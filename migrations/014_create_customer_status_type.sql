@@ -1,0 +1,6 @@
+CREATE TYPE customer_status AS ENUM (
+'ACTIVE',
+'ON_HOLD',
+'INACTIVE',
+'CHURNED'
+);
