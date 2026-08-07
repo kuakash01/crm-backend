@@ -22,7 +22,11 @@ router.get(
   authorize("customers", "read"),
   customersController.getCustomers
 );
-
+router.get(
+  "/options",
+  authorize("customers", "read"),
+  customersController.getCustomerOptions
+);
 router.get(
   "/:id/deals",
   authorize("deals", "read"),

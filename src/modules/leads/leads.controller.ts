@@ -1,17 +1,30 @@
 import { Response, Request, NextFunction } from "express";
 import * as leadsService from "./leads.service";
+import { hasPermission } from "../auth/auth.helper";
 
 export const getLeads = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // return res.status(200).json({"status":"testing", user:req.user})
     const leads = await leadsService.getLeads(
       req.user.organization_id,
-      req.user.id, req.user.role,
+      req.user.id,
       {
-        status: (req.query.status)?.toString().toLocaleUpperCase(),
-        search: (req.query.search)?.toString().toLocaleUpperCase()
+        page: req.query.page
+          ? Number(req.query.page)
+          : 1,
+
+        limit: req.query.limit
+          ? Number(req.query.limit)
+          : 10,
+
+        status: req.query.status
+          ?.toString()
+          .toUpperCase(),
+
+        search: req.query.search
+          ?.toString()
       },
-      req.user.permissions.includes(
+      hasPermission(
+        req.user.permissions,
         "leads:view_unassigned"
       )
     );
@@ -24,7 +37,11 @@ export const getLeads = async (req: Request, res: Response, next: NextFunction) 
 export const createLead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     // return res.status(200).json({ status: "testing", req: req.user });
-    const lead = await leadsService.createLead(req.user.organization_id, req.user.id, req.user.fullname, req.body);
+    const lead = await leadsService.createLead(
+      req.user.organization_id,
+      req.user.id,
+      req.body
+    );
     res.status(200).json({ message: "leads created successfully", data: lead });
   } catch (error) {
     next(error)
@@ -61,8 +78,8 @@ export const updateLeadDetails = async (
     const lead = await leadsService.updateLeadDetails(
       Number(req.params.id),
       Number(req.user.id),
-      req.user.fullname,
       Number(req.user.organization_id),
+      req.user.role,
       req.body
     );
 
@@ -106,7 +123,6 @@ export const assignLeads = async (
 
     await leadsService.assignLeads(
       req.user.id,
-      req.user.fullname,
       leadIds,
       assignedTo,
     );
@@ -134,7 +150,6 @@ export const updateLeadStatus = async (
       await leadsService.updateLeadStatus(
         Number(req.params.id),
         Number(req.user.id),
-        req.user.fullname,
         Number(req.user.organization_id),
         status
       );

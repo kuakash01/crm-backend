@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import * as customersService from "./customers.service";
+import { hasPermission } from "../auth/auth.helper";
 
 export const createCustomer = async (
   req: Request,
@@ -39,7 +40,25 @@ export const getCustomers = async (
 
     const customers =
       await customersService.getCustomers(
-        req.user.organization_id
+        req.user.organization_id,
+        req.user.id,
+        {
+          page: req.query.page
+            ? Number(req.query.page)
+            : 1,
+
+          limit: req.query.limit
+            ? Number(req.query.limit)
+            : 10,
+
+          status: req.query.status
+            ?.toString()
+            .toUpperCase(),
+
+          search: req.query.search
+            ?.toString()
+        },
+
       );
 
     res.status(200).json({
@@ -151,7 +170,6 @@ export const deleteCustomer = async (
     await customersService.deleteCustomer(
       req.user.organization_id,
       Number(req.params.id),
-      req.user.id
     );
 
     res.status(200).json({
@@ -177,7 +195,6 @@ export const assignCustomer = async (
 
     await customersService.assignCustomer(
       req.user.id,
-      req.user.fullname,
       customerIds,
       assignedTo,
     );
@@ -216,5 +233,38 @@ export const getCustomerDeals = async (
     next(error);
 
   }
+
+};
+
+
+export const getCustomerOptions = async (
+  req: Request,
+  res: Response
+) => {
+  const organizationId = req.user.organization_id;
+  const currentUserId = req.user.id;
+
+  const {
+    q,
+    page,
+    limit,
+  } = req.query;
+
+  const customers = await customersService.getCustomerOptions(
+    organizationId,
+    currentUserId,
+    {
+      search: q as string,
+      page: Number(page) || 1,
+      limit: Number(limit) || 10,
+    }
+  );
+
+
+  res.status(200).json({
+    status: "success",
+    data: customers,
+    message: "Customer options fetched successfully"
+  });
 
 };

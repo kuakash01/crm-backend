@@ -37,29 +37,29 @@ export const getTasks = async (
   res: Response,
   next: NextFunction
 ) => {
-
   try {
-
-    const tasks =
-      await taskService.getTasks(
-        Number(req.user.organization_id),
-        (req.params.entityType).toString().toUpperCase(),
-        Number(req.params.entityId)
-      );
+    const tasks = await taskService.getTasks(
+      Number(req.user.organization_id),
+      String(req.params.entityType)?.toUpperCase(),
+      Number(req.params.entityId),
+      {
+        page: req.query.page
+          ? Number(req.query.page)
+          : undefined,
+        limit: req.query.limit
+          ? Number(req.query.limit)
+          : undefined,
+      }
+    );
 
     res.status(200).json({
       status: "success",
-      data: tasks
+      data: tasks,
     });
-
   } catch (error) {
-
     next(error);
-
   }
-
 };
-
 export const updateTask = async (
   req: Request,
   res: Response,

@@ -11,8 +11,3 @@ export interface UserDetails {
 }
 
 
-export interface AuthUser {
-  id: number;
-  email: string;
-  role: string;
-}

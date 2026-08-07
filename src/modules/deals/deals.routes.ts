@@ -8,7 +8,8 @@ import {
   updateDeal,
   updateDealStage,
   deleteDeal,
-  assignDeals
+  assignDeals,
+  getPipelineDeals
 } from "./deals.controller";
 
 import {
@@ -30,6 +31,11 @@ router.get(
   "/",
   authorize("deals", "read"),
   getDeals
+);
+router.get(
+  "/pipeline",
+  authorize("deals", "read"),
+  getPipelineDeals
 );
 
 router.get(

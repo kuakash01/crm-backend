@@ -1,9 +1,14 @@
 import { pool } from "../../config/db";
 import { AppError } from "../../shared/errors/AppError";
-import { createActivity } from "../activities/activites.service";
+import { createActivity, createActivities } from "../activities/activites.service";
 import { validateAssignee, getVisibleUserIds } from "../users/users.service";
 import { DealStage } from "./deals.types";
-import { buildDealFilters, validateCustomerAndService, buildDealCounts } from "./deals.helper";
+import { buildDealFilters, validateCustomerAndService, getDealCounts, getFilteredDealCounts } from "./deals.helper";
+import { buildPagination } from "../../shared/helpers/pagination.helper";
+import { shiftSqlParams } from "../../shared/helpers/sql.helper";
+import { ActivityInput } from "../activities/activities.types";
+import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
+
 
 
 export const createDeal = async (
@@ -25,8 +30,7 @@ export const createDeal = async (
       stage,
       price,
       expected_close_date,
-      assigned_to,
-      notes
+
     } = data;
 
     await validateCustomerAndService(
@@ -36,14 +40,18 @@ export const createDeal = async (
       client
     );
 
-    // Validate assignee
-    if (assigned_to) {
-      await validateAssignee(
-        currentUserId,
-        assigned_to,
-        client
-      );
-    }
+    // Get the assigned_to of the customer
+    const customerDetails = await client.query(
+      `
+      SELECT
+        id,
+        assigned_to
+      FROM customers
+      WHERE id = $1
+      `,
+      [customer_id]
+    );
+    const customer_assigned_to = customerDetails.rows[0].assigned_to;
 
     // Create deal
     const result = await client.query(
@@ -56,11 +64,10 @@ export const createDeal = async (
         price,
         expected_close_date,
         assigned_to,
-        organization_id,
-        notes
+        organization_id
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
       `,
@@ -71,21 +78,21 @@ export const createDeal = async (
         stage ?? "OPEN",
         price,
         expected_close_date ?? null,
-        assigned_to ?? null,
+        customer_assigned_to ?? currentUserId,
         organizationId,
-        notes ?? null
       ]
     );
 
-    await createActivity(
-      organizationId,
-      "DEALS",
-      result.rows[0].id,
-      "CREATED",
-      `Deal '${title}' created`,
-      currentUserId,
-      client
-    );
+    await createActivities([
+      {
+        organizationId,
+        entityType: "DEAL",
+        entityId: result.rows[0].id,
+        activityType: "CREATED",
+        description: "Deal created",
+        createdBy: currentUserId,
+      },
+    ], client);
 
     await client.query("COMMIT");
 
@@ -94,6 +101,7 @@ export const createDeal = async (
   } catch (error) {
 
     await client.query("ROLLBACK");
+    console.error("Error creating deal:", error);
 
     throw error;
 
@@ -108,171 +116,144 @@ export const createDeal = async (
 export const getDeals = async (
   organizationId: number,
   currentUserId: number,
-  role: string,
   filters?: {
     stage?: string;
-    customerId?: number;
-    serviceId?: number;
     search?: string;
+    page?: number;
+    limit?: number;
   },
   canViewUnassigned = false
 ) => {
 
   try {
 
+    const {
+      conditions,
+      params,
+    } = buildDealFilters(filters);
 
-    let result;
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
 
-    // ADMIN
-    if (
-      role.toLowerCase() === "admin"
-    ) {
-      const {
-        conditions,
-        params,
-      } = buildDealFilters(
-        filters,
-        2
+    const visibleUsers =
+      await getVisibleUserIds(
+        currentUserId
       );
 
-      params.unshift(
-        organizationId
-      );
+    params.unshift(organizationId);
+    params.unshift(visibleUsers);
 
-      result = await pool.query(
-        `
-        SELECT
-          d.*,
+    const visibilityCondition =
+      canViewUnassigned
+        ? `
+      (
+        d.assigned_to IS NULL
+        OR d.assigned_to = ANY($1::int[])
+      )
+    `
+        : `
+      d.assigned_to = ANY($1::int[])
+    `;
 
-          CONCAT(
-            c.fname,
-            ' ',
-            COALESCE(c.lname,'')
-          ) AS customer_name,
-
-          s.name AS service_name,
-
-          u.fullname AS assigned_to_name
-
-        FROM deals d
-
-        INNER JOIN customers c
-          ON c.id = d.customer_id
-
-        INNER JOIN services s
-          ON s.id = d.service_id
-
-        LEFT JOIN users u
-          ON u.id = d.assigned_to
-
-        WHERE
-    d.organization_id = $1
-
-    ${conditions.length
-          ? "AND " +
-          conditions.join(" AND ")
-          : ""
-        }
-
-        ORDER BY
-          d.created_at DESC
-        `,
-        params
-      );
-
-    }
-
-    // NON ADMIN
-    else {
-      const {
-        conditions,
-        params,
-      } = buildDealFilters(
-        filters,
-        3
-      );
-
-      const visibleUsers =
-        await getVisibleUserIds(
-          currentUserId
-        );
-
-      params.unshift(
-        organizationId
-      );
-
-      params.unshift(
-        visibleUsers
-      );
-
-      const visibilityCondition =
-        canViewUnassigned
-          ? `
-            (
-              d.assigned_to IS NULL
-              OR d.assigned_to = ANY($1::int[])
-            )
-          `
-          : `
-            d.assigned_to = ANY($1::int[])
-          `;
-
-      result = await pool.query(
-        `
-        SELECT
-          d.*,
-
-          CONCAT(
-            c.fname,
-            ' ',
-            COALESCE(c.lname,'')
-          ) AS customer_name,
-
-          s.name AS service_name,
-
-          u.fullname AS assigned_to_name
-
-        FROM deals d
-
-        INNER JOIN customers c
-          ON c.id = d.customer_id
-
-        INNER JOIN services s
-          ON s.id = d.service_id
-
-        LEFT JOIN users u
-          ON u.id = d.assigned_to
-
-        WHERE
-
+    const whereClause = `
+  WHERE
     d.organization_id = $2
-
     AND ${visibilityCondition}
-
     ${conditions.length
-          ? "AND " +
-          conditions.join(" AND ")
-          : ""
-        }
-
-        ORDER BY
-          d.created_at DESC
-        `,
-        params
-      );
-
-    }
-
-    const deals = result.rows;
+        ? "AND " +
+        shiftSqlParams(
+          conditions,
+          2
+        )
+        : ""
+      }
+`;
 
     const counts =
-      buildDealCounts(deals);
+      await getDealCounts(
+        visibilityCondition,
+        organizationId,
+        visibleUsers,
+        filters
+      );
+
+    const total = await getFilteredDealCounts(
+      visibilityCondition,
+      organizationId,
+      visibleUsers,
+      filters
+    );
+
+    const queryParams = [
+      ...params,
+      limit,
+      offset,
+    ];
+
+    const result =
+      await pool.query(
+        `
+    SELECT
+      d.*,
+
+      CONCAT(
+        c.fname,
+        ' ',
+        COALESCE(c.lname,'')
+      ) AS customer_name,
+
+      s.name AS service_name,
+
+      u.fullname AS assigned_to_name
+
+    FROM deals d
+
+    INNER JOIN customers c
+      ON c.id = d.customer_id
+
+    INNER JOIN services s
+      ON s.id = d.service_id
+
+    LEFT JOIN users u
+      ON u.id = d.assigned_to
+
+    ${whereClause}
+
+    ORDER BY
+      d.created_at DESC
+
+    LIMIT $${queryParams.length - 1}
+
+    OFFSET $${queryParams.length}
+    `,
+        queryParams
+      );
 
     return {
-      deals,
-      counts,
-    };
 
+      deals: result.rows,
+
+      counts,
+
+      pagination: {
+
+        page,
+
+        limit,
+
+        total: total,
+
+        totalPages:
+          Math.ceil(
+            total / limit
+          )
+
+      }
+
+    };
   } catch (error) {
 
     console.log(
@@ -287,6 +268,87 @@ export const getDeals = async (
 
   }
 
+};
+
+export const getPipelineDeals = async (
+  organizationId: number,
+  currentUserId: number,
+   canViewUnassigned: boolean
+) => {
+  try {
+
+    const visibleUsers =
+      await getVisibleUserIds(
+        currentUserId
+      );
+
+    const visibilityCondition =
+      canViewUnassigned
+        ? `
+      (
+        d.assigned_to IS NULL
+        OR d.assigned_to = ANY($1::int[])
+      )
+    `
+        : `
+      d.assigned_to = ANY($1::int[])
+    `;
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          d.*,
+
+          CONCAT(
+            c.fname,
+            ' ',
+            COALESCE(c.lname,'')
+          ) AS customer_name,
+
+          s.name AS service_name,
+
+          u.fullname AS assigned_to_name
+
+        FROM deals d
+
+        INNER JOIN customers c
+          ON c.id = d.customer_id
+
+        INNER JOIN services s
+          ON s.id = d.service_id
+
+        LEFT JOIN users u
+          ON u.id = d.assigned_to
+
+        WHERE
+          d.organization_id = $2
+          AND ${visibilityCondition}
+
+        ORDER BY
+          d.updated_at DESC
+        `,
+        [
+          visibleUsers,
+          organizationId,
+        ]
+      );
+
+    return result.rows;
+
+  } catch (error) {
+
+    console.log(
+      "Error fetching pipeline deals",
+      error
+    );
+
+    throw new AppError(
+      "Error fetching pipeline deals",
+      500
+    );
+
+  }
 };
 
 export const getDealById = async (
@@ -426,8 +488,7 @@ export const updateDeal = async (
       service_id,
       price,
       expected_close_date,
-      assigned_to,
-      notes
+      assigned_to
     } = data;
 
     // Validate customer & service
@@ -457,11 +518,10 @@ export const updateDeal = async (
         price = $4,
         expected_close_date = $5,
         assigned_to = $6,
-        notes = $7,
         updated_at = NOW()
       WHERE
-        id = $8
-        AND organization_id = $9
+        id = $7
+        AND organization_id = $8
       RETURNING id
       `,
       [
@@ -471,7 +531,6 @@ export const updateDeal = async (
         price,
         expected_close_date ?? null,
         assigned_to ?? null,
-        notes ?? null,
         dealId,
         organizationId
       ]
@@ -484,13 +543,17 @@ export const updateDeal = async (
       );
     }
 
-    await createActivity(
-      organizationId,
-      "DEALS",
-      dealId,
-      "UPDATED",
-      "Deal updated",
-      currentUserId,
+    await createActivities(
+      [
+        {
+          organizationId,
+          entityType: "DEAL",
+          entityId: dealId,
+          activityType: "UPDATED",
+          description: "Deal updated",
+          createdBy: currentUserId,
+        },
+      ],
       client
     );
 
@@ -531,6 +594,37 @@ export const updateDealStage = async (
 
     await client.query("BEGIN");
 
+    const dealResult = await client.query(
+      `
+      SELECT stage
+      FROM deals
+      WHERE
+        id = $1
+        AND organization_id = $2
+      `,
+      [
+        dealId,
+        organizationId
+      ]
+    );
+
+    if (!dealResult.rows.length) {
+      throw new AppError(
+        "Deal not found",
+        404
+      );
+    }
+
+    const oldStage =
+      dealResult.rows[0].stage;
+
+    if (oldStage === stage) {
+      throw new AppError(
+        "Deal is already in this stage",
+        400
+      );
+    }
+
     const result = await client.query(
       `
       UPDATE deals
@@ -549,28 +643,25 @@ export const updateDealStage = async (
       ]
     );
 
-    if (!result.rows.length) {
-      throw new AppError(
-        "Deal not found",
-        404
-      );
-    }
-
-    await createActivity(
-      organizationId,
-      "DEALS",
-      dealId,
-      "STAGE_CHANGED",
-      `Deal stage updated to ${stage}`,
-      currentUserId,
+    await createActivities(
+      [
+        {
+          organizationId,
+          entityType: "DEAL",
+          entityId: dealId,
+          activityType: "STAGE_CHANGED",
+          description: `Stage changed from ${oldStage} to ${stage}`,
+          createdBy: currentUserId,
+        },
+      ],
       client
     );
 
     /**
      * Future
      *
-     * if(stage === "WON") {
-     *    // Create project
+     * if (stage === "WON") {
+     *   // Create project
      * }
      */
 
@@ -594,8 +685,7 @@ export const updateDealStage = async (
 
 export const deleteDeal = async (
   dealId: number,
-  organizationId: number,
-  currentUserId: number
+  organizationId: number
 ) => {
 
   const client = await pool.connect();
@@ -626,17 +716,16 @@ export const deleteDeal = async (
       );
     }
 
-    await createActivity(
+    await deleteEntityRelations(
       organizationId,
-      "DEALS",
+      "DEAL",
       dealId,
-      "DELETED",
-      `Deal '${result.rows[0].title}' deleted`,
-      currentUserId,
       client
     );
 
     await client.query("COMMIT");
+
+    return result.rows[0];
 
   } catch (error) {
 
@@ -658,21 +747,66 @@ export const assignDeals = async (
   dealIds: number[],
   assignedTo: number
 ) => {
-
   const client = await pool.connect();
 
   try {
-
     await client.query("BEGIN");
 
-    // Validate assignee
     await validateAssignee(
       currentUserId,
       assignedTo,
       client
     );
 
-    const result = await client.query(
+    const assigneeResult = await client.query(
+      `
+      SELECT fullname
+      FROM users
+      WHERE id = $1
+      `,
+      [assignedTo]
+    );
+
+    if (!assigneeResult.rows.length) {
+      throw new AppError(
+        "Assignee not found",
+        404
+      );
+    }
+
+    const newAssigneeName =
+      assigneeResult.rows[0].fullname;
+
+    const dealsResult = await client.query(
+      `
+      SELECT
+        d.id,
+        d.assigned_to,
+        u.fullname AS assigned_to_name
+      FROM deals d
+      LEFT JOIN users u
+        ON u.id = d.assigned_to
+      WHERE
+        d.organization_id = $1
+        AND d.id = ANY($2::int[])
+      `,
+      [
+        organizationId,
+        dealIds,
+      ]
+    );
+
+    if (
+      dealsResult.rows.length !==
+      dealIds.length
+    ) {
+      throw new AppError(
+        "One or more deals do not belong to your organization",
+        403
+      );
+    }
+
+    await client.query(
       `
       UPDATE deals
       SET
@@ -681,7 +815,6 @@ export const assignDeals = async (
       WHERE
         organization_id = $2
         AND id = ANY($3::int[])
-      RETURNING id
       `,
       [
         assignedTo,
@@ -690,34 +823,28 @@ export const assignDeals = async (
       ]
     );
 
-    if (!result.rows.length) {
-
-      throw new AppError(
-        "Deal not found",
-        404
-      );
-
-    }
-
-    for (const deal of result.rows) {
-
-      await createActivity(
+    const activities: ActivityInput[] =
+      dealsResult.rows.map((deal) => ({
         organizationId,
-        "DEALS",
-        deal.id,
-        "ASSIGNED",
-        "Deal reassigned",
-        currentUserId,
-        client
-      );
+        entityType: "DEAL",
+        entityId: deal.id,
+        activityType: "ASSIGNED",
+        description:
+          deal.assigned_to_name
+            ? `Reassigned from ${deal.assigned_to_name} to ${newAssigneeName}`
+            : `Assigned to ${newAssigneeName}`,
+        createdBy: currentUserId,
+      }));
 
-    }
+    await createActivities(
+      activities,
+      client
+    );
 
     await client.query("COMMIT");
 
     return {
-      updatedCount:
-        result.rowCount,
+      updatedCount: dealIds.length,
     };
 
   } catch (error) {
@@ -731,5 +858,4 @@ export const assignDeals = async (
     client.release();
 
   }
-
 };

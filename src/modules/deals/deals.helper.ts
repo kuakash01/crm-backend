@@ -1,86 +1,69 @@
 import { Pool, PoolClient } from "pg";
 import { AppError } from "../../shared/errors/AppError";
 import { pool } from "../../config/db";
-
-type DealFilters = {
-  stage?: string;
-  customerId?: number;
-  serviceId?: number;
-  search?: string;
-};
+import { shiftSqlParams } from "../../shared/helpers/sql.helper";
 
 export const buildDealFilters = (
-  filters?: DealFilters,
-  startIndex = 1
+  filters?: {
+    stage?: string;
+    customerId?: number;
+    serviceId?: number;
+    search?: string;
+  },
+  includeStage = true
 ) => {
 
   const conditions: string[] = [];
-
-  const params: unknown[] = [];
-
-  let index = startIndex;
+  const params: any[] = [];
 
   if (
+    includeStage &&
     filters?.stage &&
     filters.stage !== "ALL"
   ) {
 
+    params.push(filters.stage);
+
     conditions.push(
-      `d.stage = $${index}`
+      `d.stage = $${params.length}`
     );
-
-    params.push(
-      filters.stage
-    );
-
-    index++;
 
   }
 
   if (filters?.customerId) {
 
+    params.push(filters.customerId);
+
     conditions.push(
-      `d.customer_id = $${index}`
+      `d.customer_id = $${params.length}`
     );
-
-    params.push(
-      filters.customerId
-    );
-
-    index++;
 
   }
 
   if (filters?.serviceId) {
 
+    params.push(filters.serviceId);
+
     conditions.push(
-      `d.service_id = $${index}`
+      `d.service_id = $${params.length}`
     );
-
-    params.push(
-      filters.serviceId
-    );
-
-    index++;
 
   }
 
   if (filters?.search) {
 
-    conditions.push(`
-      (
-        d.title ILIKE $${index}
-        OR c.company ILIKE $${index}
-        OR CONCAT(c.fname,' ',COALESCE(c.lname,'')) ILIKE $${index}
-        OR s.name ILIKE $${index}
-      )
-    `);
-
     params.push(
       `%${filters.search}%`
     );
 
-    index++;
+    conditions.push(`
+      (
+        d.title ILIKE $${params.length}
+        OR c.company ILIKE $${params.length}
+        OR CONCAT(c.fname,' ',COALESCE(c.lname,'')) ILIKE $${params.length}
+        OR s.name ILIKE $${params.length}
+      )
+    `);
 
   }
 
@@ -90,7 +73,6 @@ export const buildDealFilters = (
   };
 
 };
-
 
 export const validateCustomerAndService = async (
   organizationId: number,
@@ -149,29 +131,140 @@ export const validateCustomerAndService = async (
 };
 
 
-export const buildDealCounts = (
-  deals: { stage: string }[]
+export const getDealCounts = async (
+  visibilityCondition: string,
+  organizationId: number,
+  visibleUsers: number[],
+  filters?: {
+    stage?: string;
+    customerId?: number;
+    serviceId?: number;
+    search?: string;
+  }
 ) => {
 
-  const counts: Record<string, number> = {
-    ALL: deals.length,
-    OPEN: 0,
-    QUOTATION_SENT: 0,
-    NEGOTIATION: 0,
-    WON: 0,
-    LOST: 0,
+  const {
+    conditions,
+    params,
+  } = buildDealFilters(
+    filters,
+    false
+  );
+
+  params.unshift(
+    organizationId
+  );
+
+  params.unshift(
+    visibleUsers
+  );
+
+  const whereClause = `
+    WHERE
+      d.organization_id = $2
+      AND ${visibilityCondition}
+      ${conditions.length
+      ? "AND " +
+      shiftSqlParams(
+        conditions,
+        2
+      )
+      : ""
+    }
+  `;
+
+  const result =
+    await pool.query(
+      `
+      SELECT
+        d.stage,
+        COUNT(*)::int AS total
+
+      FROM deals d
+
+      INNER JOIN customers c
+        ON c.id = d.customer_id
+
+      INNER JOIN services s
+        ON s.id = d.service_id
+
+      ${whereClause}
+
+      GROUP BY d.stage
+      `,
+      params
+    );
+
+  const counts: Record<
+    string,
+    number
+  > = {
+    ALL: 0,
   };
 
-  deals.forEach((deal) => {
+  result.rows.forEach(row => {
 
-    if (deal.stage in counts) {
+    counts[row.stage] =
+      row.total;
 
-      counts[deal.stage]++;
-
-    }
+    counts.ALL +=
+      row.total;
 
   });
 
   return counts;
 
+};
+
+export const getFilteredDealCounts = async (
+  visibilityCondition: string,
+  organizationId: number,
+  visibleUsers: number[],
+  filters?: {
+    stage?: string;
+    customerId?: number;
+    serviceId?: number;
+    search?: string;
+  }
+) => {
+
+  const {
+    conditions,
+    params,
+  } = buildDealFilters(
+    filters,
+  );
+
+  params.unshift(
+    organizationId
+  );
+
+  params.unshift(
+    visibleUsers
+  );
+
+  const whereClause = `
+    WHERE
+      d.organization_id = $2
+      AND ${visibilityCondition}
+      ${conditions.length
+      ? "AND " +
+      shiftSqlParams(
+        conditions,
+        2
+      )
+      : ""
+    }
+  `;
+
+  const result = await pool.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM deals d
+      ${whereClause}
+    `,
+    params
+  );
+
+  return result.rows[0].total;
 };

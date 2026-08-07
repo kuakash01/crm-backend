@@ -37,28 +37,29 @@ export const getNotes = async (
   res: Response,
   next: NextFunction
 ) => {
-
   try {
-
-    const notes =
-      await notesService.getNotes(
-        (req.params.entityType).toString().toUpperCase(),
-        Number(req.params.entityId)
-      );
+    const notes = await notesService.getNotes(
+      req.user.organization_id,
+      String(req.params.entityType).toUpperCase(),
+      Number(req.params.entityId),
+      {
+        page: req.query.page
+          ? Number(req.query.page)
+          : undefined,
+        limit: req.query.limit
+          ? Number(req.query.limit)
+          : undefined,
+      }
+    );
 
     res.status(200).json({
       status: "success",
-      data: notes
+      data: notes,
     });
-
   } catch (error) {
-
     next(error);
-
   }
-
 };
-
 export const updateNote = async (
   req: Request,
   res: Response,

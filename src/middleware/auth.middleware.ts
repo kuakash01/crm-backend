@@ -2,7 +2,6 @@
 
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { AuthUser } from "../modules/auth/auth.types";
 import { AppError } from "../shared/errors/AppError";
 import { pool } from "../config/db";
 import { JWT_SECRET } from "../config/env";

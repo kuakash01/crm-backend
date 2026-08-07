@@ -1,6 +1,11 @@
 import { pool } from "../../config/db";
 import { createActivity } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
+import {
+  buildPagination,
+  buildPaginationResponse,
+  PaginationOptions,
+} from "../../shared/helpers/pagination.helper";
 
 export const createNote = async (
   organizationId: number,
@@ -58,38 +63,103 @@ export const createNote = async (
 
 };
 
+// export const getNotes = async (
+//   entityType: string,
+//   entityId: number
+// ) => {
+
+//   const result = await pool.query(
+//     `
+//     SELECT
+//       n.id,
+//       n.note,
+//       n.created_at,
+//       n.updated_at,
+//       u.fullname AS created_by_name
+//     FROM notes n
+//     INNER JOIN users u
+//       ON u.id = n.created_by
+//     WHERE
+//       n.entity_type = $1
+//       AND n.entity_id = $2
+//     ORDER BY
+//       n.created_at DESC
+//     `,
+//     [
+//       entityType,
+//       entityId
+//     ]
+//   );
+
+//   return result.rows;
+
+// };
+
+
+
+
 export const getNotes = async (
+  organizationId: number,
   entityType: string,
-  entityId: number
+  entityId: number,
+  options?: PaginationOptions
 ) => {
+  const { page, limit, offset } = buildPagination(options);
 
-  const result = await pool.query(
-    `
-    SELECT
-      n.id,
-      n.note,
-      n.created_at,
-      n.updated_at,
-      u.fullname AS created_by_name
-    FROM notes n
-    INNER JOIN users u
-      ON u.id = n.created_by
-    WHERE
-      n.entity_type = $1
-      AND n.entity_id = $2
-    ORDER BY
-      n.created_at DESC
-    `,
-    [
-      entityType,
-      entityId
-    ]
+  const [notesResult, countResult] = await Promise.all([
+    pool.query(
+      `
+      SELECT
+        n.id,
+        n.note,
+        n.created_at,
+        n.updated_at,
+        u.fullname AS created_by_name
+      FROM notes n
+      INNER JOIN users u
+        ON u.id = n.created_by
+      WHERE
+        n.organization_id = $1
+        AND n.entity_type = $2
+        AND n.entity_id = $3
+      ORDER BY
+        n.created_at DESC
+      LIMIT $4
+      OFFSET $5
+      `,
+      [
+        organizationId,
+        entityType,
+        entityId,
+        limit,
+        offset,
+      ]
+    ),
+
+    pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM notes
+      WHERE
+        organization_id = $1
+        AND entity_type = $2
+        AND entity_id = $3
+      `,
+      [
+        organizationId,
+        entityType,
+        entityId,
+      ]
+    ),
+  ]);
+
+  return buildPaginationResponse(
+    notesResult.rows,
+    page,
+    limit,
+    countResult.rows[0].total
   );
-
-  return result.rows;
-
 };
-
 
 export const updateNote = async (
   entityType: string,

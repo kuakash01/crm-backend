@@ -1,182 +1,152 @@
 import { pool } from "../../config/db";
 import { AppError } from "../../shared/errors/AppError";
 import { getVisibleUserIds, validateAssignee } from "../users/users.service";
-import { createActivity } from "../activities/activites.service";
+import { createActivities } from "../activities/activites.service";
 import { createCustomer } from "../customers/customers.service";
 import { leadType } from "./leads.types";
+// helper
+import { buildLeadFilters, getFilteredLeadCount, getLeadCounts } from "./leads.helper";
+import { buildPagination } from "../../shared/helpers/pagination.helper";
+import { shiftSqlParams } from "../../shared/helpers/sql.helper";
+import { assertLeadEditable } from "./leads.helper";
+import { ActivityInput } from "../activities/activities.types";
+import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
 
 
 export const getLeads = async (
   organizationId: number,
   currentUserId: number,
-  role: string,
   filters?: {
     status?: string;
     search?: string;
+    page?: number;
+    limit?: number;
   },
   canViewUnassigned = false
 ) => {
 
   try {
 
-    const conditions: string[] = [];
-    const params: any[] = [];
+    const {
+      conditions,
+      params,
+    } =
+      buildLeadFilters(filters);
 
-    // status filter
-    if (
-      filters?.status &&
-      filters.status !== "ALL"
-    ) {
 
-      params.push(filters.status);
+    const {
+      page,
+      limit,
+      offset,
+    } =
+      buildPagination(filters);
 
-      conditions.push(
-        `l.status = $${params.length}`
+
+    const visibleUsers =
+      await getVisibleUserIds(
+        currentUserId
       );
-    }
+    params.unshift(
+      organizationId
+    );
 
-    // search filter
-    if (filters?.search) {
+    params.unshift(
+      visibleUsers
+    );
 
-      params.push(
-        `%${filters.search}%`
+
+
+    const visibilityCondition =
+      canViewUnassigned
+        ? `
+          (
+            l.assigned_to IS NULL
+            OR l.assigned_to = ANY($1::int[])
+          )
+        `
+        : `
+          l.assigned_to = ANY($1::int[])
+        `;
+
+    const whereClause = `
+      WHERE
+        l.organization_id = $2
+        AND ${visibilityCondition}
+        ${conditions.length
+        ? "AND " +
+        shiftSqlParams(
+          conditions,
+          2
+        )
+        : ""
+      }
+    `;
+
+    const counts =
+      await getLeadCounts(
+        visibilityCondition,
+        organizationId,
+        visibleUsers,
+        filters
       );
 
-      conditions.push(`
-      (
-        CONCAT(l.fname,' ',l.lname) ILIKE $${params.length}
-        OR l.email ILIKE $${params.length}
-        OR l.company ILIKE $${params.length}
-      )
-      `);
-    }
+    const total = await getFilteredLeadCount(
+      visibilityCondition,
+      organizationId,
+      visibleUsers,
+      filters
+    );
 
-    let result;
+    const queryParams = [
+      ...params,
+      limit,
+      offset,
+    ];
 
-    // ADMIN
-    if (
-      role.toLowerCase() ===
-      "admin"
-    ) {
-
-      params.unshift(
-        organizationId
-      );
-
-      result = await pool.query(
+    const result =
+      await pool.query(
         `
         SELECT
           l.*,
           u.fullname AS assigned_to_name
+
         FROM leads l
+
         LEFT JOIN users u
           ON u.id = l.assigned_to
-        WHERE
-          l.organization_id = $1
-          ${conditions.length
-          ? "AND " +
-          conditions
-            .map(c =>
-              c.replace(
-                /\$(\d+)/g,
-                (_, n) =>
-                  `$${Number(n) + 1}`
-              )
-            )
-            .join(" AND ")
-          : ""
+
+        ${whereClause}
+
+        ORDER BY
+          l.created_at DESC
+
+        LIMIT $${queryParams.length - 1
         }
-        ORDER BY l.created_at DESC
+
+        OFFSET $${queryParams.length
+        }
         `,
-        params
+        queryParams
       );
-
-    }
-
-    // NON ADMIN
-    else {
-      const visibleUsers =
-        await getVisibleUserIds(
-          currentUserId
-        );
-
-      params.unshift(
-        organizationId
-      );
-
-      params.unshift(
-        visibleUsers
-      );
-
-      const visibilityCondition =
-        canViewUnassigned
-          ?
-          `
-(
-  l.assigned_to IS NULL
-  OR l.assigned_to = ANY($1::int[])
-)
-`
-          :
-          `
-l.assigned_to = ANY($1::int[])
-`;
-
-      result = await pool.query(
-        `
-  SELECT
-    l.*,
-    u.fullname AS assigned_to_name
-  FROM leads l
-  LEFT JOIN users u
-    ON u.id = l.assigned_to
-  WHERE
-    l.organization_id = $2
-    AND ${visibilityCondition}
-    ${conditions.length
-          ? "AND " +
-          conditions
-            .map(c =>
-              c.replace(
-                /\$(\d+)/g,
-                (_, n) =>
-                  `$${Number(n) + 2}`
-              )
-            )
-            .join(" AND ")
-          : ""
-        }
-  ORDER BY
-    l.created_at DESC
-  `,
-        params
-      );
-    }
-    const leads = result.rows;
-
-    const counts: Record<
-      string,
-      number
-    > = {
-      ALL: leads.length
-    };
-
-    leads.forEach(
-      (lead: any) => {
-
-        counts[lead.status] =
-          (
-            counts[
-            lead.status
-            ] || 0
-          ) + 1;
-
-      }
-    );
 
     return {
-      leads,
-      counts
+
+      leads:
+        result.rows,
+
+      counts,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages:
+          Math.ceil(
+            total /
+            limit
+          ),
+      },
+
     };
 
   } catch (error) {
@@ -198,7 +168,6 @@ l.assigned_to = ANY($1::int[])
 export const createLead = async (
   organizationId: number,
   userId: number,
-  userName: string,
   lead: leadType
 ) => {
   try {
@@ -242,8 +211,15 @@ export const createLead = async (
 
     const result = await pool.query(query, values);
 
-    // Optional: If createActivity is async, remember to await it if needed
-    await createActivity(organizationId, "LEAD", result.rows[0].id, "CREATED", `New Lead Created by ${userName}`, userId);
+    const activity: ActivityInput = {
+      organizationId,
+      entityType: "LEAD",
+      entityId: result.rows[0].id,
+      activityType: "CREATED",
+      description: "Lead created",
+      createdBy: userId,
+    }
+    await createActivities([activity]);
 
     // Returning the single created object instead of the whole rows array is usually cleaner
     return result.rows[0];
@@ -266,16 +242,12 @@ export const getLeadById = async (
 ) => {
   const result = await pool.query(
     `
-   SELECT
+  SELECT
     l.*,
-    u.fullname AS assigned_to_name,
-    c.id AS customer_id,
-    (c.id IS NOT NULL) AS customer_created
+    u.fullname AS assigned_to_name
 FROM leads l
 LEFT JOIN users u
     ON u.id = l.assigned_to
-LEFT JOIN customers c
-    ON c.lead_id = l.id
 WHERE
     l.id = $1
     AND l.organization_id = $2;
@@ -293,8 +265,8 @@ WHERE
 export const updateLeadDetails = async (
   leadId: number,
   userId: number,
-  userName: string,
   organizationId: number,
+  currentUserRole: string,
   leadData: any
 ) => {
   const {
@@ -306,6 +278,35 @@ export const updateLeadDetails = async (
     company,
   } = leadData;
 
+  // 1. Fetch lead
+  const leadResult = await pool.query(
+    `
+    SELECT
+      converted_at
+    FROM leads
+    WHERE
+      id = $1
+      AND organization_id = $2
+    `,
+    [leadId, organizationId]
+  );
+
+  if (!leadResult.rows.length) {
+    throw new AppError(
+      "Lead not found",
+      404
+    );
+  }
+
+  const lead = leadResult.rows[0];
+
+  // 2. Business rule
+  assertLeadEditable(
+    lead,
+    currentUserRole
+  )
+
+  // 3. Update
   const result = await pool.query(
     `
     UPDATE leads
@@ -317,7 +318,6 @@ export const updateLeadDetails = async (
       phone2 = $5,
       company = $6,
       updated_at = NOW()
-   
     WHERE
       id = $7
       AND organization_id = $8
@@ -335,45 +335,29 @@ export const updateLeadDetails = async (
     ]
   );
 
-  if (!result.rows.length) {
-    throw new AppError(
-      "Lead not found",
-      404
-    );
-  }
-  await createActivity(organizationId, "LEAD", leadId, "UPDATED", `Lead Updated by ${userName}`, userId);
+  // 4. Activity
+
+  await createActivities(
+    [
+      {
+        organizationId,
+        entityType: "LEAD",
+        entityId: leadId,
+        activityType: "UPDATED",
+        description: "Lead updated",
+        createdBy: userId,
+      },
+    ]
+  );
 
   return result.rows[0];
 };
 
-export const deleteLead = async (
-  leadId: number,
-  organizationId: number
-) => {
-  const result = await pool.query(
-    `
-    DELETE FROM leads
-    WHERE id = $1
-    AND organization_id = $2
-    RETURNING id
-    `,
-    [leadId, organizationId]
-  );
-
-  if (!result.rows.length) {
-    throw new AppError("Lead not found", 404);
-  }
-
-  return true;
-};
-
 export const assignLeads = async (
   currentUserId: number,
-  userName: string,
   leadIds: number[],
   assignedTo: number
 ) => {
-
   if (!leadIds.length) {
     throw new AppError(
       "No leads selected",
@@ -381,8 +365,12 @@ export const assignLeads = async (
     );
   }
 
-  const currentUserResult =
-    await pool.query(
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const currentUserResult = await client.query(
       `
       SELECT organization_id
       FROM users
@@ -391,94 +379,170 @@ export const assignLeads = async (
       [currentUserId]
     );
 
-  if (!currentUserResult.rows.length) {
-    throw new AppError(
-      "User not found",
-      404
+    if (!currentUserResult.rows.length) {
+      throw new AppError(
+        "User not found",
+        404
+      );
+    }
+
+    const organizationId =
+      currentUserResult.rows[0].organization_id;
+
+    await validateAssignee(
+      currentUserId,
+      assignedTo
     );
-  }
 
-  const organizationId =
-    currentUserResult.rows[0]
-      .organization_id;
+    const assigneeResult =
+      await client.query(
+        `
+        SELECT fullname
+        FROM users
+        WHERE id = $1
+        `,
+        [assignedTo]
+      );
 
-  await validateAssignee(
-    currentUserId,
-    assignedTo
-  );
+    if (!assigneeResult.rows.length) {
+      throw new AppError(
+        "Assignee not found",
+        404
+      );
+    }
 
-  const leadsResult =
-    await pool.query(
+    const newAssigneeName =
+      assigneeResult.rows[0].fullname;
+
+    const leadsResult =
+      await client.query(
+        `
+        SELECT
+          l.id,
+          l.assigned_to,
+          u.fullname AS assigned_to_name
+        FROM leads l
+        LEFT JOIN users u
+          ON u.id = l.assigned_to
+        WHERE
+          l.id = ANY($1::int[])
+          AND l.organization_id = $2
+        `,
+        [
+          leadIds,
+          organizationId,
+        ]
+      );
+
+    if (
+      leadsResult.rows.length !==
+      leadIds.length
+    ) {
+      throw new AppError(
+        "One or more leads do not belong to your organization",
+        403
+      );
+    }
+
+    await client.query(
       `
-      SELECT id
-      FROM leads
+      UPDATE leads
+      SET
+        assigned_to = $1,
+        updated_at = NOW()
       WHERE
-        id = ANY($1::int[])
-        AND organization_id = $2
+        id = ANY($2::int[])
       `,
       [
+        assignedTo,
         leadIds,
-        organizationId,
       ]
     );
 
-  if (
-    leadsResult.rows.length !==
-    leadIds.length
-  ) {
-    throw new AppError(
-      "One or more leads do not belong to your organization",
-      403
+    const activities =
+      leadsResult.rows.map((lead) => ({
+        organizationId,
+        entityType: "LEAD",
+        entityId: lead.id,
+        activityType: "ASSIGNED",
+        description:
+          lead.assigned_to_name
+            ? `Reassigned from ${lead.assigned_to_name} to ${newAssigneeName}`
+            : `Assigned to ${newAssigneeName}`,
+        createdBy: currentUserId,
+      }));
+
+    await createActivities(
+      activities,
+      client
     );
-  }
 
-  await pool.query(
-    `
-    UPDATE leads
-    SET
-      assigned_to = $1,
-      updated_at = NOW()
-    WHERE id = ANY($2::int[])
-    `,
-    [
+    await client.query("COMMIT");
+
+    return {
       assignedTo,
-      leadIds,
-    ]
-  );
+      totalAssigned: leadIds.length,
+    };
 
-  await createActivity(organizationId, "LEAD", leadIds, "ASSIGNED", `Lead Assigned By ${userName}`, currentUserId);
+  } catch (error) {
 
-  return {
-    assignedTo,
-    totalAssigned:
-      leadIds.length,
-  };
+    await client.query("ROLLBACK");
+
+    throw error;
+
+  } finally {
+
+    client.release();
+
+  }
 };
 
 export const updateLeadStatus = async (
   leadId: number,
   userId: number,
-  userName: string,
   organizationId: number,
   status: string
 ) => {
-
   const client = await pool.connect();
 
   try {
-
     await client.query("BEGIN");
 
+    // Get current lead
+    const leadResult = await client.query(
+      `
+      SELECT *
+      FROM leads
+      WHERE
+        id = $1
+        AND organization_id = $2
+      `,
+      [leadId, organizationId]
+    );
+
+    if (!leadResult.rows.length) {
+      throw new AppError("Lead not found", 404);
+    }
+
+    const lead = leadResult.rows[0];
+
+    // Business rule:
+    // Lead must be assigned before conversion
+    if (status === "CONVERTED" && !lead.assigned_to) {
+      throw new AppError(
+        "Assign the lead before converting it.",
+        400
+      );
+    }
+
+    // Update status
     const result = await client.query(
       `
       UPDATE leads
       SET
         status = $1,
         updated_at = NOW()
-        ${status === "CONVERTED"
-        ? ", converted_at = NOW()"
-        : ""
-      }
+        ${status === "CONVERTED" ? ", converted_at = NOW()" : ""}
       WHERE
         id = $2
         AND organization_id = $3
@@ -487,54 +551,53 @@ export const updateLeadStatus = async (
       [
         status,
         leadId,
-        organizationId
+        organizationId,
       ]
     );
 
-    if (!result.rows.length) {
+    const updatedLead = result.rows[0];
 
-      throw new AppError(
-        "Lead not found",
-        404
-      );
-
-    }
-
-    const customer = {
-      fname: result.rows[0].fname,
-      lname: result.rows[0].lname,
-      email: result.rows[0].email,
-      phone1: result.rows[0].phone1,
-      phone2: result.rows[0].phone2,
-      company: result.rows[0].company,
-      assigned_to: result.rows[0].assigned_to,
-      lead_id: result.rows[0].id
-    }
-
+    // Create customer if converted
     if (status === "CONVERTED") {
       await createCustomer(
         organizationId,
         userId,
-        customer,
-        client)
+        {
+          fname: updatedLead.fname,
+          lname: updatedLead.lname,
+          email: updatedLead.email,
+          phone1: updatedLead.phone1,
+          phone2: updatedLead.phone2,
+          company: updatedLead.company,
+          assigned_to: updatedLead.assigned_to,
+          lead_id: updatedLead.id,
+        },
+        client
+      );
     }
 
-    await createActivity(
-      organizationId,
-      "LEAD",
-      result.rows[0].id,
-      "STATUS_CHANGED",
-      `Lead status updated to ${status} by ${userName}`,
-      userId,
-      client // pass transaction client
+    // Activity log
+    const activity: ActivityInput[] =
+      [
+        {
+          organizationId,
+          entityType: "LEAD",
+          entityId: updatedLead.id,
+          activityType: "STATUS_CHANGED",
+           description: `Status changed from ${lead.status} to ${updatedLead.status}`,
+          createdBy: userId,
+        },
+      ];
+
+    await createActivities(
+      activity,
+      client
     );
 
     await client.query("COMMIT");
 
-    return result.rows[0];
-
+    return updatedLead;
   } catch (error: any) {
-
     await client.query("ROLLBACK");
 
     if (
@@ -548,11 +611,52 @@ export const updateLeadStatus = async (
     }
 
     throw error;
-
   } finally {
-
     client.release();
-
   }
+};
 
+export const deleteLead = async (
+  leadId: number,
+  organizationId: number
+) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await deleteEntityRelations(
+      organizationId,
+      "LEAD",
+      leadId,
+      client
+    );
+
+    const result = await client.query(
+      `
+      DELETE FROM leads
+      WHERE
+        id = $1
+        AND organization_id = $2
+      RETURNING id
+      `,
+      [leadId, organizationId]
+    );
+
+    if (!result.rows.length) {
+      throw new AppError(
+        "Lead not found",
+        404
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };

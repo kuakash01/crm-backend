@@ -9,7 +9,6 @@ CREATE TABLE
     expected_close_date DATE,
     assigned_to INTEGER,
     organization_id INTEGER NOT NULL,
-    notes TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW (),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW (),
     CONSTRAINT fk_deals_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,

@@ -1,6 +1,12 @@
 import { pool } from "../../config/db";
 import { createActivity } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
+import {
+  buildPagination,
+  buildPaginationResponse,
+  PaginationOptions,
+} from "../../shared/helpers/pagination.helper";
+
 
 
 export const createTask = async (
@@ -64,39 +70,68 @@ export const createTask = async (
 export const getTasks = async (
   organizationId: number,
   entityType: string,
-  entityId: number
+  entityId: number,
+  options?: PaginationOptions
 ) => {
+  const { page, limit, offset } = buildPagination(options);
 
-  const result = await pool.query(
-    `
-    SELECT
-      t.*,
-      assigned.fullname AS assigned_to_name,
-      creator.fullname AS created_by_name
-    FROM tasks t
-    INNER JOIN users assigned
-      ON assigned.id = t.assigned_to
-    INNER JOIN users creator
-      ON creator.id = t.created_by
-    WHERE
-      t.entity_type = $1
-      AND t.entity_id = $2
-      AND t.organization_id = $3
-    ORDER BY
-      t.status,
-      t.due_date NULLS LAST,
-      t.created_at DESC
-    `,
-    [
-      entityType,
-      entityId,
-      organizationId
-    ]
+  const [tasksResult, countResult] = await Promise.all([
+    pool.query(
+      `
+      SELECT
+        t.*,
+        assigned.fullname AS assigned_to_name,
+        creator.fullname AS created_by_name
+      FROM tasks t
+      INNER JOIN users assigned
+        ON assigned.id = t.assigned_to
+      INNER JOIN users creator
+        ON creator.id = t.created_by
+      WHERE
+        t.entity_type = $1
+        AND t.entity_id = $2
+        AND t.organization_id = $3
+      ORDER BY
+        t.status,
+        t.due_date NULLS LAST,
+        t.created_at DESC
+      LIMIT $4
+      OFFSET $5
+      `,
+      [
+        entityType,
+        entityId,
+        organizationId,
+        limit,
+        offset,
+      ]
+    ),
+
+    pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM tasks
+      WHERE
+        entity_type = $1
+        AND entity_id = $2
+        AND organization_id = $3
+      `,
+      [
+        entityType,
+        entityId,
+        organizationId,
+      ]
+    ),
+  ]);
+
+  return buildPaginationResponse(
+    tasksResult.rows,
+    page,
+    limit,
+    countResult.rows[0].total
   );
-
-  return result.rows;
-
 };
+
 
 export const updateTask = async (
   organizationId:number,

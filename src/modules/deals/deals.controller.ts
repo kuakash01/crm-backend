@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import * as dealsService from "./deals.service";
+import { hasPermission } from "../auth/auth.helper";
 
 export const createDeal = async (
   req: Request,
@@ -33,27 +34,36 @@ export const getDeals = async (
 
   try {
 
+
     const result =
       await dealsService.getDeals(
         req.user.organization_id,
         req.user.id,
-        req.user.role,
         {
-          stage: req.query.stage as string,
-          customerId: req.query.customerId
-            ? Number(req.query.customerId)
-            : undefined,
-          serviceId: req.query.serviceId
-            ? Number(req.query.serviceId)
-            : undefined,
-          search: req.query.search as string,
-        }
+          page: req.query.page
+            ? Number(req.query.page)
+            : 1,
+
+          limit: req.query.limit
+            ? Number(req.query.limit)
+            : 10,
+
+          stage: req.query.stage
+            ?.toString()
+            .toUpperCase(),
+
+          search: req.query.search
+            ?.toString()
+        },
+        hasPermission(
+          req.user.permissions,
+          "leads:view_unassigned"
+        )
       );
 
     res.status(200).json({
       status: "success",
-      data: result.deals,
-      counts: result.counts,
+      data: result
     });
 
   } catch (error) {
@@ -62,6 +72,35 @@ export const getDeals = async (
 
   }
 
+};
+
+export const getPipelineDeals = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+
+    const deals =
+      await dealsService.getPipelineDeals(
+        Number(req.user.organization_id),
+        req.user.id,
+        hasPermission(
+          req.user.permissions,
+          "leads:view_unassigned"
+        )
+      );
+
+    res.status(200).json({
+      status: "success",
+      data: deals,
+    });
+
+  } catch (error) {
+
+    next(error);
+
+  }
 };
 
 export const getDealById = async (
@@ -161,7 +200,6 @@ export const deleteDeal = async (
     await dealsService.deleteDeal(
       Number(req.params.id),
       req.user.organization_id,
-      req.user.id
     );
 
     res.status(200).json({

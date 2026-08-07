@@ -1,8 +1,140 @@
 import { Pool, PoolClient } from "pg";
 import { pool } from "../../config/db";
-import { createActivity } from "../activities/activites.service";
+import { createActivity, createActivities } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
-import { validateAssignee } from "../users/users.service";
+import { validateAssignee, getVisibleUserIds } from "../users/users.service";
+// helpers
+import { buildPagination } from "../../shared/helpers/pagination.helper";
+import { shiftSqlParams } from "../../shared/helpers/sql.helper";
+import {
+  buildCustomerFilters,
+  getCustomerCounts,
+  getFilteredCustomerCount,
+} from "./customers.helper";
+import { ActivityInput } from "../activities/activities.types";
+import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
+
+
+
+export const getCustomers = async (
+  organizationId: number,
+  currentUserId: number,
+  filters?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  },
+
+) => {
+
+  try {
+
+    const {
+      conditions,
+      params,
+    } = buildCustomerFilters(filters);
+
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
+
+    const visibleUsers =
+      await getVisibleUserIds(currentUserId);
+
+    params.unshift(organizationId);
+    params.unshift(visibleUsers);
+
+    const visibilityCondition = `
+          c.assigned_to = ANY($1::int[])
+        `;
+
+    const whereClause = `
+      WHERE
+        c.organization_id = $2
+        AND ${visibilityCondition}
+        ${conditions.length
+        ? "AND " +
+        shiftSqlParams(
+          conditions,
+          2
+        )
+        : ""
+      }
+    `;
+
+    const counts =
+      await getCustomerCounts(
+        visibilityCondition,
+        organizationId,
+        visibleUsers,
+        filters
+      );
+    const total = await getFilteredCustomerCount(
+      visibilityCondition,
+      organizationId,
+      visibleUsers,
+      filters
+    );
+
+    const queryParams = [
+      ...params,
+      limit,
+      offset,
+    ];
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          c.*,
+
+          u.fullname AS assigned_to_name
+
+        FROM customers c
+
+        LEFT JOIN users u
+          ON u.id = c.assigned_to
+
+        ${whereClause}
+
+        ORDER BY
+          c.created_at DESC
+
+        LIMIT $${queryParams.length - 1}
+
+        OFFSET $${queryParams.length}
+        `,
+        queryParams
+      );
+
+    return {
+      customers: result.rows,
+      counts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(
+          total / limit
+        )
+      }
+    };
+
+  } catch (error) {
+
+    console.log(error);
+
+    throw new AppError(
+      "Error fetching customers",
+      500
+    );
+
+  }
+
+};
 
 export const createCustomer = async (
   organizationId: number,
@@ -19,7 +151,8 @@ export const createCustomer = async (
     phone2,
     company,
     assigned_to,
-    lead_id
+    lead_id,
+    created_from
   } = data;
 
   // Prevent duplicate customer creation from same lead
@@ -55,11 +188,12 @@ export const createCustomer = async (
       phone2,
       company,
       assigned_to,
+      created_from,
       lead_id,
       organization_id
     )
     VALUES(
-      $1,$2,$3,$4,$5,$6,$7,$8,$9
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
     )
     RETURNING *
     `,
@@ -71,6 +205,7 @@ export const createCustomer = async (
       phone2 ?? null,
       company ?? null,
       assigned_to ?? null,
+      created_from ?? 'LEAD',
       lead_id ?? null,
       organizationId
     ]
@@ -78,41 +213,20 @@ export const createCustomer = async (
 
   const customer = result.rows[0];
 
-  await createActivity(
+  const activity: ActivityInput = {
     organizationId,
-    "CUSTOMER",
-    customer.id,
-    "CREATED",
-    lead_id
+    entityType: "CUSTOMER",
+    entityId: customer.id,
+    activityType: "CREATED",
+    description: lead_id
       ? "Customer created from lead"
-      : "Customer created manually",
-    currentUserId,
-    db
-  );
+      : `Customer created using ${created_from}`,
+    createdBy: currentUserId
+  };
+
+  await createActivities([activity], db);
 
   return customer;
-
-};
-
-export const getCustomers = async (
-  organizationId: number
-) => {
-
-  const result = await pool.query(
-    `
-    SELECT
-      c.*,
-      u.fullname AS assigned_to_name
-    FROM customers c
-    LEFT JOIN users u
-      ON u.id = c.assigned_to
-    WHERE c.organization_id = $1
-    ORDER BY c.created_at DESC
-    `,
-    [organizationId]
-  );
-
-  return result.rows;
 
 };
 
@@ -201,14 +315,18 @@ export const updateCustomer = async (
     );
   }
 
-  await createActivity(
-    organizationId,
-    "CUSTOMER",
-    customerId,
-    "UPDATED",
-    "Customer updated",
-    currentUserId
-  );
+  const activities: ActivityInput[] = [
+    {
+      organizationId,
+      entityType: "CUSTOMER",
+      entityId: customerId,
+      activityType: "UPDATED",
+      description: "Customer updated",
+      createdBy: currentUserId,
+    },
+  ];
+
+  await createActivities(activities);
 
   return result.rows[0];
 
@@ -220,6 +338,37 @@ export const updateCustomerStatus = async (
   status: string,
   currentUserId: number
 ) => {
+
+  const customerResult = await pool.query(
+    `
+    SELECT status
+    FROM customers
+    WHERE
+      id = $1
+      AND organization_id = $2
+    `,
+    [
+      customerId,
+      organizationId
+    ]
+  );
+
+  if (!customerResult.rows.length) {
+    throw new AppError(
+      "Customer not found",
+      404
+    );
+  }
+
+  const oldStatus =
+    customerResult.rows[0].status;
+
+  if (oldStatus === status) {
+    throw new AppError(
+      "Customer is already in this status",
+      400
+    );
+  }
 
   const result = await pool.query(
     `
@@ -239,21 +388,16 @@ export const updateCustomerStatus = async (
     ]
   );
 
-  if (!result.rows.length) {
-    throw new AppError(
-      "Customer not found",
-      404
-    );
-  }
-
-  await createActivity(
-    organizationId,
-    "CUSTOMER",
-    customerId,
-    "STATUS_CHANGED",
-    `Customer status changed to ${status}`,
-    currentUserId
-  );
+  await createActivities([
+    {
+      organizationId,
+      entityType: "CUSTOMER",
+      entityId: customerId,
+      activityType: "STATUS_CHANGED",
+      description: `Status changed from ${oldStatus} to ${status}`,
+      createdBy: currentUserId,
+    },
+  ]);
 
   return result.rows[0];
 
@@ -261,61 +405,77 @@ export const updateCustomerStatus = async (
 
 export const deleteCustomer = async (
   organizationId: number,
-  customerId: number,
-  currentUserId: number
+  customerId: number
 ) => {
+  const client = await pool.connect();
 
-  const result = await pool.query(
-    `
-    DELETE
-    FROM customers
-    WHERE
-      id = $1
-      AND organization_id = $2
-    RETURNING *
-    `,
-    [
-      customerId,
-      organizationId
-    ]
-  );
+  try {
+    await client.query("BEGIN");
 
-  if (!result.rows.length) {
-    throw new AppError(
-      "Customer not found",
-      404
+    const result = await client.query(
+      `
+      DELETE
+      FROM customers
+      WHERE
+        id = $1
+        AND organization_id = $2
+      RETURNING *
+      `,
+      [
+        customerId,
+        organizationId
+      ]
     );
+
+    if (!result.rows.length) {
+      throw new AppError(
+        "Customer not found",
+        404
+      );
+    }
+
+    await deleteEntityRelations(
+      organizationId,
+      "CUSTOMER",
+      customerId,
+      client
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0];
+
+  } catch (error) {
+
+    await client.query("ROLLBACK");
+
+    throw error;
+
+  } finally {
+
+    client.release();
+
   }
-
-  await createActivity(
-    organizationId,
-    "CUSTOMER",
-    customerId,
-    "DELETED",
-    "Customer deleted",
-    currentUserId
-  );
-
-  return result.rows[0];
-
 };
 
 export const assignCustomer = async (
   currentUserId: number,
-  userName: string,
   customerIds: number[],
   assignedTo: number
 ) => {
-
   if (!customerIds.length) {
     throw new AppError(
-      "No Customer selected",
+      "No customers selected",
       400
     );
   }
 
-  const currentUserResult =
-    await pool.query(
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const currentUserResult = await client.query(
       `
       SELECT organization_id
       FROM users
@@ -324,30 +484,52 @@ export const assignCustomer = async (
       [currentUserId]
     );
 
-  if (!currentUserResult.rows.length) {
-    throw new AppError(
-      "User not found",
-      404
+    if (!currentUserResult.rows.length) {
+      throw new AppError(
+        "User not found",
+        404
+      );
+    }
+
+    const organizationId =
+      currentUserResult.rows[0].organization_id;
+
+    await validateAssignee(
+      currentUserId,
+      assignedTo
     );
-  }
 
-  const organizationId =
-    currentUserResult.rows[0]
-      .organization_id;
-
-  await validateAssignee(
-    currentUserId,
-    assignedTo
-  );
-
-  const customerResult =
-    await pool.query(
+    const assigneeResult = await client.query(
       `
-      SELECT id
-      FROM customers
+      SELECT fullname
+      FROM users
+      WHERE id = $1
+      `,
+      [assignedTo]
+    );
+
+    if (!assigneeResult.rows.length) {
+      throw new AppError(
+        "Assignee not found",
+        404
+      );
+    }
+
+    const newAssigneeName =
+      assigneeResult.rows[0].fullname;
+
+    const customerResult = await client.query(
+      `
+      SELECT
+        c.id,
+        c.assigned_to,
+        u.fullname AS assigned_to_name
+      FROM customers c
+      LEFT JOIN users u
+        ON u.id = c.assigned_to
       WHERE
-        id = ANY($1::int[])
-        AND organization_id = $2
+        c.id = ANY($1::int[])
+        AND c.organization_id = $2
       `,
       [
         customerIds,
@@ -355,40 +537,70 @@ export const assignCustomer = async (
       ]
     );
 
-  if (
-    customerResult.rows.length !==
-    customerIds.length
-  ) {
-    throw new AppError(
-      "One or more customers do not belong to your organization",
-      403
+    if (
+      customerResult.rows.length !==
+      customerIds.length
+    ) {
+      throw new AppError(
+        "One or more customers do not belong to your organization",
+        403
+      );
+    }
+
+    await client.query(
+      `
+      UPDATE customers
+      SET
+        assigned_to = $1,
+        updated_at = NOW()
+      WHERE
+        id = ANY($2::int[])
+      `,
+      [
+        assignedTo,
+        customerIds,
+      ]
     );
-  }
 
-  await pool.query(
-    `
-    UPDATE customers
-    SET
-      assigned_to = $1,
-      updated_at = NOW()
-    WHERE id = ANY($2::int[])
-    `,
-    [
+    const activities: ActivityInput[] =
+      customerResult.rows.map(
+        (customer) => ({
+          organizationId,
+          entityType: "CUSTOMER",
+          entityId: customer.id,
+          activityType: "ASSIGNED",
+          description:
+            customer.assigned_to_name
+              ? `Reassigned from ${customer.assigned_to_name} to ${newAssigneeName}`
+              : `Assigned to ${newAssigneeName}`,
+          createdBy: currentUserId,
+        })
+      );
+
+    await createActivities(
+      activities,
+      client
+    );
+
+    await client.query("COMMIT");
+
+    return {
       assignedTo,
-      customerIds,
-    ]
-  );
+      totalAssigned: customerIds.length,
+    };
 
-  await createActivity(organizationId, "CUSTOMER", customerIds, "ASSIGNED", `Customer Assigned By ${userName}`, currentUserId);
+  } catch (error) {
 
-  return {
-    assignedTo,
-    totalAssigned:
-      customerIds.length,
-  };
+    await client.query("ROLLBACK");
+
+    throw error;
+
+  } finally {
+
+    client.release();
+
+  }
 };
-
-
 
 export const getCustomerDeals = async (
   customerId: number,
@@ -449,4 +661,112 @@ export const getCustomerDeals = async (
 
   return result.rows;
 
+};
+
+export const getCustomerOptions = async (
+  organizationId: number,
+  currentUserId: number,
+  filters?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  },
+  canViewUnassigned = false
+) => {
+  try {
+    const { page, limit, offset } = buildPagination(filters);
+
+    const visibleUsers = await getVisibleUserIds(currentUserId);
+
+    const params: any[] = [
+      visibleUsers,
+      organizationId,
+    ];
+
+    const visibilityCondition = canViewUnassigned
+      ? `
+        (
+          c.assigned_to IS NULL
+          OR c.assigned_to = ANY($1::int[])
+        )
+      `
+      : `
+        c.assigned_to = ANY($1::int[])
+      `;
+
+    let whereClause = `
+      WHERE
+        c.organization_id = $2
+        AND ${visibilityCondition}
+    `;
+
+    if (filters?.search) {
+      params.push(`%${filters.search}%`);
+
+      whereClause += `
+        AND (
+          CONCAT(c.fname, ' ', c.lname) ILIKE $${params.length}
+          OR c.company ILIKE $${params.length}
+          OR c.email ILIKE $${params.length}
+          OR c.phone1 ILIKE $${params.length}
+        )
+      `;
+    }
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM customers c
+      ${whereClause}
+      `,
+      params
+    );
+
+
+    const total = countResult.rows[0].total;
+
+    params.push(limit);
+    params.push(offset);
+
+    const result = await pool.query(
+      `
+      SELECT
+        c.id,
+        c.fname,
+        c.lname,
+        c.company,
+        c.email,
+        c.phone1
+      FROM customers c
+
+      ${whereClause}
+
+      ORDER BY
+        c.fname ASC,
+        c.lname ASC
+
+      LIMIT $${params.length - 1}
+      OFFSET $${params.length}
+      `,
+      params
+    );
+
+    return {
+      customers: result.rows,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  } catch (error) {
+    console.log(error);
+
+    throw new AppError(
+      "Error fetching customer options",
+      500
+    );
+  }
 };

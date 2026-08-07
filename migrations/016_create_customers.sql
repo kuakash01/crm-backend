@@ -23,6 +23,8 @@ CREATE TABLE customers(
   company VARCHAR(255),
   status customer_status NOT NULL
     DEFAULT 'ACTIVE',
+  created_from customer_created_from NOT NULL
+    DEFAULT 'LEAD',
   lead_id INTEGER UNIQUE,
   assigned_to INTEGER,
   organization_id INTEGER NOT NULL,

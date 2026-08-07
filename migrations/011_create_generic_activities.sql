@@ -1,8 +1,8 @@
-
 CREATE TYPE activity_type AS ENUM (
   'CREATED',
   'UPDATED',
   'STATUS_CHANGED',
+  'STAGE_CHANGED',
   'ASSIGNED',
   'NOTE_ADDED',
   'TASK_CREATED',
