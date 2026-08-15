@@ -3,6 +3,8 @@ import { Pool, PoolClient } from "pg";
 import { AppError } from "../../shared/errors/AppError"
 import bcryptjs from "bcryptjs";
 import { CreateUserDto } from "./users.types";
+import { createNotifications } from "../notifications/notification.helper";
+
 
 export const getUsers = async (
   organizationId: number
@@ -152,17 +154,76 @@ export const updateUser = async (
 export const changeRole = async (
   id: number,
   roleId: number,
-  organizationId: number
+  organizationId: number,
+  currentUserId: number
 ) => {
+  // Get user's current role
+  const userResult = await pool.query(
+    `
+    SELECT
+      u.role_id,
+      r.name AS role_name
+    FROM users u
+    LEFT JOIN roles r
+      ON r.id = u.role_id
+    WHERE
+      u.id = $1
+      AND u.organization_id = $2
+    `,
+    [
+      id,
+      organizationId,
+    ]
+  );
+
+  if (!userResult.rows.length) {
+    throw new AppError(
+      "User not found",
+      404
+    );
+  }
+
+  const oldRole = userResult.rows[0].role_name;
+
+  // Get new role name
+  const roleResult = await pool.query(
+    `
+    SELECT name
+    FROM roles
+    WHERE
+      id = $1
+      AND organization_id = $2
+    `,
+    [
+      roleId,
+      organizationId,
+    ]
+  );
+
+  if (!roleResult.rows.length) {
+    throw new AppError(
+      "Role not found",
+      404
+    );
+  }
+
+  const newRole = roleResult.rows[0].name;
+
+  if (userResult.rows[0].role_id === roleId) {
+    throw new AppError(
+      "User already has this role",
+      400
+    );
+  }
 
   await pool.query(
     `
     UPDATE users
-    SET role_id = $1
+    SET
+      role_id = $1
     WHERE
       id = $2
-      AND
-      organization_id = $3
+      AND organization_id = $3
     `,
     [
       roleId,
@@ -170,22 +231,68 @@ export const changeRole = async (
       organizationId,
     ]
   );
+
+  // Notify affected user
+  if (id !== currentUserId) {
+    await createNotifications({
+      organizationId,
+      userIds: [id],
+      type: "USER",
+      action: "UPDATED",
+      title: "Role Updated",
+      message: `Your role has been changed from ${oldRole} to ${newRole}.`,
+      entityType: "USER",
+      entityId: id,
+    });
+  }
 };
 
 export const changeStatus = async (
   id: number,
   isActive: boolean,
-  organizationId: number
+  organizationId: number,
+  currentUserId: number
 ) => {
+  const userResult = await pool.query(
+    `
+    SELECT
+      is_active,
+      fullname
+    FROM users
+    WHERE
+      id = $1
+      AND organization_id = $2
+    `,
+    [
+      id,
+      organizationId,
+    ]
+  );
+
+  if (!userResult.rows.length) {
+    throw new AppError(
+      "User not found",
+      404
+    );
+  }
+
+  const user = userResult.rows[0];
+
+  if (user.is_active === isActive) {
+    throw new AppError(
+      `User is already ${isActive ? "active" : "inactive"}`,
+      400
+    );
+  }
 
   await pool.query(
     `
     UPDATE users
-    SET is_active = $1
+    SET
+      is_active = $1
     WHERE
       id = $2
-      AND
-      organization_id = $3
+      AND organization_id = $3
     `,
     [
       isActive,
@@ -193,6 +300,21 @@ export const changeStatus = async (
       organizationId,
     ]
   );
+
+  // Notify the affected user
+  if (id !== currentUserId) {
+    await createNotifications({
+      organizationId,
+      userIds: [id],
+      type: "USER",
+      action: "UPDATED",
+      title: "Account Status Changed",
+      message: `Your account has been ${isActive ? "activated" : "deactivated"
+        }.`,
+      entityType: "USER",
+      entityId: id,
+    });
+  }
 };
 
 export const deleteUser = async (

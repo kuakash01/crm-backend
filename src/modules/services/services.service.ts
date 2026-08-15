@@ -1,10 +1,27 @@
 import { pool } from "../../config/db";
-import { createActivity } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
+import { buildPagination } from "../../shared/helpers/pagination.helper";
+import { createNotifications } from "../notifications/notification.helper";
+
+export interface ServiceOption {
+  id: number;
+  name: string;
+  base_price: number | string;
+}
+
+export interface ServiceOptionsResponse {
+  services: ServiceOption[];
+
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
 
 export const createService = async (
   organizationId: number,
-  currentUserId: number,
   data: any
 ) => {
 
@@ -41,16 +58,6 @@ export const createService = async (
       ]
     );
 
-    // await createActivity(
-    //   organizationId,
-    //   "SERVICES",
-    //   result.rows[0].id,
-    //   "CREATED",
-    //   `Service '${name}' created`,
-    //   currentUserId,
-    //   client
-    // );
-
     await client.query("COMMIT");
 
     return result.rows[0];
@@ -70,27 +77,123 @@ export const createService = async (
 
 export const getServices = async (
   organizationId: number,
-  includeInactive = false
+  filters?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+    includeInactive?: boolean;
+  }
 ) => {
+  try {
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
 
-  const result = await pool.query(
-    `
-    SELECT *
-    FROM services
-    WHERE
-      organization_id = $1
-      ${includeInactive
-      ? ""
-      : "AND is_active = TRUE"
+    const values: any[] = [
+      organizationId,
+    ];
+
+    let index = 2;
+
+    let whereClause = `
+      WHERE
+        s.organization_id = $1
+    `;
+
+    if (!filters?.includeInactive) {
+      whereClause += `
+        AND s.is_active = TRUE
+      `;
     }
-    ORDER BY
-      name
-    `,
-    [organizationId]
-  );
 
-  return result.rows;
+    if (filters?.search?.trim()) {
+      values.push(
+        `%${filters.search.trim()}%`
+      );
 
+      whereClause += `
+        AND (
+          s.name ILIKE $${index}
+          OR COALESCE(
+            s.description,
+            ''
+          ) ILIKE $${index}
+        )
+      `;
+
+      index++;
+    }
+
+    // Total count
+    const totalResult =
+      await pool.query(
+        `
+        SELECT
+          COUNT(*)::int AS total
+
+        FROM services s
+
+        ${whereClause}
+        `,
+        values
+      );
+
+    const total =
+      totalResult.rows[0].total;
+
+    // Pagination
+    const queryParams = [
+      ...values,
+      limit,
+      offset,
+    ];
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          s.*
+
+        FROM services s
+
+        ${whereClause}
+
+        ORDER BY
+          s.name
+
+        LIMIT $${queryParams.length - 1}
+
+        OFFSET $${queryParams.length}
+        `,
+        queryParams
+      );
+
+    return {
+      services: result.rows,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages:
+          Math.ceil(
+            total / limit
+          ),
+      },
+    };
+  } catch (error) {
+    console.log(
+      "Error fetching services",
+      error
+    );
+
+    throw new AppError(
+      "Error fetching services",
+      500
+    );
+  }
 };
 
 export const getServiceById = async (
@@ -126,7 +229,6 @@ export const getServiceById = async (
 export const updateService = async (
   serviceId: number,
   organizationId: number,
-  currentUserId: number,
   data: any
 ) => {
 
@@ -174,15 +276,7 @@ export const updateService = async (
       );
     }
 
-    // await createActivity(
-    //   organizationId,
-    //   "SERVICE",
-    //   serviceId,
-    //   "UPDATED",
-    //   "Service updated",
-    //   currentUserId,
-    //   client
-    // );
+
 
     await client.query("COMMIT");
 
@@ -204,7 +298,6 @@ export const updateService = async (
 export const deleteService = async (
   serviceId: number,
   organizationId: number,
-  currentUserId: number
 ) => {
 
   const client = await pool.connect();
@@ -253,15 +346,7 @@ export const deleteService = async (
       );
     }
 
-    // await createActivity(
-    //   organizationId,
-    //   "SERVICE",
-    //   serviceId,
-    //   "DELETED",
-    //   `Service '${result.rows[0].name}' deleted`,
-    //   currentUserId,
-    //   client
-    // );
+
 
     await client.query("COMMIT");
 
@@ -276,4 +361,105 @@ export const deleteService = async (
 
   }
 
+};
+
+export const getServiceOptions = async (
+  organizationId: number,
+  filters?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }
+) => {
+  try {
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
+
+    const params: any[] = [
+      organizationId,
+    ];
+
+    let whereClause = `
+      WHERE
+        s.organization_id = $1
+        AND s.is_active = TRUE
+    `;
+
+    if (filters?.search?.trim()) {
+      params.push(
+        `%${filters.search.trim()}%`
+      );
+
+      whereClause += `
+        AND (
+          s.name ILIKE $${params.length}
+          OR COALESCE(s.description, '') ILIKE $${params.length}
+        )
+      `;
+    }
+
+    const countResult =
+      await pool.query(
+        `
+        SELECT COUNT(*)::int AS total
+        FROM services s
+        ${whereClause}
+        `,
+        params
+      );
+
+    const total =
+      countResult.rows[0].total;
+
+    const queryParams = [
+      ...params,
+      limit,
+      offset,
+    ];
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          s.id,
+          s.name,
+          s.base_price
+        FROM services s
+
+        ${whereClause}
+
+        ORDER BY
+          s.name ASC
+
+        LIMIT $${queryParams.length - 1}
+        OFFSET $${queryParams.length}
+        `,
+        queryParams
+      );
+
+    return {
+      services: result.rows,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages:
+          Math.ceil(total / limit),
+      },
+    };
+  } catch (error) {
+    console.log(
+      "Error fetching service options",
+      error
+    );
+
+    throw new AppError(
+      "Error fetching service options",
+      500
+    );
+  }
 };

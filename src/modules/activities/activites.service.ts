@@ -4,52 +4,6 @@ import { buildPagination, PaginationOptions, buildPaginationResponse } from "../
 import { ActivityInput } from "./activities.types";
 
 
-export const createActivity = async (
-  organizationId: number,
-  entityType: string,
-  entityId: number | number[],
-  activityType: string,
-  description: string,
-  createdBy: number,
-  db: Pool | PoolClient = pool
-) => {
-
-  const ids = Array.isArray(entityId)
-    ? entityId
-    : [entityId];
-
-  const result = await db.query(
-    `
-    INSERT INTO activities(
-      organization_id,
-      entity_type,
-      entity_id,
-      activity_type,
-      description,
-      created_by
-    )
-    SELECT
-      $1,
-      $2,
-      UNNEST($3::int[]),
-      $4,
-      $5,
-      $6
-    RETURNING *
-    `,
-    [
-      organizationId,
-      entityType,
-      ids,
-      activityType,
-      description,
-      createdBy
-    ]
-  );
-
-  return result.rows;
-};
-
 export const createActivities = async (
   activities: ActivityInput[],
   db: Pool | PoolClient = pool

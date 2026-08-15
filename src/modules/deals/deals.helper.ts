@@ -227,21 +227,13 @@ export const getFilteredDealCounts = async (
     search?: string;
   }
 ) => {
-
   const {
     conditions,
     params,
-  } = buildDealFilters(
-    filters,
-  );
+  } = buildDealFilters(filters);
 
-  params.unshift(
-    organizationId
-  );
-
-  params.unshift(
-    visibleUsers
-  );
+  params.unshift(organizationId);
+  params.unshift(visibleUsers);
 
   const whereClause = `
     WHERE
@@ -260,7 +252,15 @@ export const getFilteredDealCounts = async (
   const result = await pool.query(
     `
       SELECT COUNT(*)::int AS total
+
       FROM deals d
+
+      INNER JOIN customers c
+        ON c.id = d.customer_id
+
+      INNER JOIN services s
+        ON s.id = d.service_id
+
       ${whereClause}
     `,
     params

@@ -1,11 +1,13 @@
 CREATE TYPE task_status AS ENUM ('PENDING', 'COMPLETED');
 
+CREATE TYPE task_priority AS ENUM ('LOW', 'NORMAL', 'HIGH', 'URGENT');
+
 CREATE TABLE
   tasks (
     id SERIAL PRIMARY KEY,
     organization_id INTEGER NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
-    entity_type entity_type NOT NULL,
-    entity_id INTEGER NOT NULL,
+    entity_type entity_type,
+    entity_id INTEGER,
     title VARCHAR(255) NOT NULL,
     description TEXT,
     due_date TIMESTAMP,
@@ -14,4 +16,35 @@ CREATE TABLE
     created_by INTEGER NOT NULL REFERENCES users (id),
     created_at TIMESTAMP DEFAULT NOW (),
     updated_at TIMESTAMP DEFAULT NOW ()
+  );
+  
+
+CREATE TABLE
+  tasks (
+    id SERIAL PRIMARY KEY,
+    organization_id INTEGER NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
+    -- Optional CRM relationship
+    entity_type entity_type,
+    entity_id INTEGER,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    due_date TIMESTAMP,
+    status task_status NOT NULL DEFAULT 'PENDING',
+    priority task_priority NOT NULL DEFAULT 'NORMAL',
+    assigned_to INTEGER NOT NULL REFERENCES users (id),
+    created_by INTEGER NOT NULL REFERENCES users (id),
+    created_at TIMESTAMP DEFAULT NOW (),
+    updated_at TIMESTAMP DEFAULT NOW (),
+    -- Either both relationship fields are NULL
+    -- or both must be provided.
+    CHECK (
+      (
+        entity_type IS NULL
+        AND entity_id IS NULL
+      )
+      OR (
+        entity_type IS NOT NULL
+        AND entity_id IS NOT NULL
+      )
+    )
   );

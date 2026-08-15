@@ -1,30 +1,42 @@
 import express from "express";
 const router = express.Router();
-import { createTask, getTasks, updateTask, updateTaskStatus, deleteTask } from "./tasks.controller";
+import { createTask, getTaskById, updateTask, updateTaskStatus, deleteTask, getAllTasks } from "./tasks.controller";
 import { verifyToken, authorize } from "../../middleware/auth.middleware";
 
 router.use(verifyToken);
 
 // task routes
-router.post("/:entityType/:entityId", authorize("tasks", "create"), createTask);
+router.post(
+  "/",
+  authorize("tasks", "create"),
+  createTask
+);
 
-router.get("/:entityType/:entityId", authorize("tasks", "read"), getTasks);
+router.get(
+  "/",
+  authorize("tasks", "read"),
+  getAllTasks
+);
 
-router.patch(
-  "/:entityType/:entityId/:taskId",
-  authorize("tasks", "upudate"),
+router.get(
+  "/:taskId",
+  getTaskById
+);
+
+
+
+router.put(
+  "/:taskId",
   updateTask
 );
 
 router.patch(
-  "/:entityType/:entityId/:taskId/status",
-  authorize("tasks", "complete"),
+  "/:taskId/status",
   updateTaskStatus
 );
 
 router.delete(
-  "/:entityType/:entityId/:taskId",
-  authorize("tasks", "delete"),
+  "/:taskId",
   deleteTask
 );
 export default router;

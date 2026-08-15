@@ -1,6 +1,6 @@
 import { pool } from "../../config/db";
 import { AppError } from "../../shared/errors/AppError";
-import { createActivity, createActivities } from "../activities/activites.service";
+import { createActivities } from "../activities/activites.service";
 import { validateAssignee, getVisibleUserIds } from "../users/users.service";
 import { DealStage } from "./deals.types";
 import { buildDealFilters, validateCustomerAndService, getDealCounts, getFilteredDealCounts } from "./deals.helper";
@@ -8,6 +8,7 @@ import { buildPagination } from "../../shared/helpers/pagination.helper";
 import { shiftSqlParams } from "../../shared/helpers/sql.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
+import { createNotifications } from "../notifications/notification.helper";
 
 
 
@@ -48,10 +49,26 @@ export const createDeal = async (
         assigned_to
       FROM customers
       WHERE id = $1
+        AND organization_id = $2
       `,
-      [customer_id]
+      [customer_id, organizationId]
     );
     const customer_assigned_to = customerDetails.rows[0].assigned_to;
+
+
+    if (!customerDetails.rows.length) {
+      throw new AppError("Customer not found", 404);
+    }
+
+    const customerAssignedTo =
+      customerDetails.rows[0].assigned_to;
+
+    if (!customerAssignedTo) {
+      throw new AppError(
+        "Customer must be assigned before creating a deal.",
+        400
+      );
+    }
 
     // Create deal
     const result = await client.query(
@@ -78,7 +95,7 @@ export const createDeal = async (
         stage ?? "OPEN",
         price,
         expected_close_date ?? null,
-        customer_assigned_to ?? currentUserId,
+        customer_assigned_to,
         organizationId,
       ]
     );
@@ -93,6 +110,19 @@ export const createDeal = async (
         createdBy: currentUserId,
       },
     ], client);
+
+    if (customerAssignedTo !== currentUserId) {
+      await createNotifications({
+        organizationId,
+        userIds: [customerAssignedTo],
+        type: "DEAL",
+        action: "ASSIGNED",
+        title: "Deal Assigned",
+        message: `A new deal "${title}" was created for you.`,
+        entityType: "DEAL",
+        entityId: result.rows[0].id,
+      });
+    }
 
     await client.query("COMMIT");
 
@@ -273,7 +303,7 @@ export const getDeals = async (
 export const getPipelineDeals = async (
   organizationId: number,
   currentUserId: number,
-   canViewUnassigned: boolean
+  canViewUnassigned: boolean
 ) => {
   try {
 
@@ -587,16 +617,17 @@ export const updateDealStage = async (
   currentUserId: number,
   stage: DealStage
 ) => {
-
   const client = await pool.connect();
 
   try {
-
     await client.query("BEGIN");
 
     const dealResult = await client.query(
       `
-      SELECT stage
+      SELECT
+        stage,
+        assigned_to,
+        title
       FROM deals
       WHERE
         id = $1
@@ -604,7 +635,7 @@ export const updateDealStage = async (
       `,
       [
         dealId,
-        organizationId
+        organizationId,
       ]
     );
 
@@ -615,8 +646,10 @@ export const updateDealStage = async (
       );
     }
 
-    const oldStage =
-      dealResult.rows[0].stage;
+    const deal = dealResult.rows[0];
+
+    const oldStage = deal.stage;
+    const assignedUserId = deal.assigned_to;
 
     if (oldStage === stage) {
       throw new AppError(
@@ -639,10 +672,53 @@ export const updateDealStage = async (
       [
         stage,
         dealId,
-        organizationId
+        organizationId,
       ]
     );
 
+    // Notification
+
+    let notificationAction:
+      | "STAGE_CHANGED"
+      | "WON"
+      | "LOST";
+
+    let title: string;
+
+    if (stage === "WON") {
+      notificationAction = "WON";
+      title = "Deal Won";
+    } else if (stage === "LOST") {
+      notificationAction = "LOST";
+      title = "Deal Lost";
+    } else {
+      notificationAction = "STAGE_CHANGED";
+      title = "Deal Stage Changed";
+    }
+
+    if (
+      assignedUserId &&
+      assignedUserId !== currentUserId
+    ) {
+      await createNotifications({
+        organizationId,
+        userIds: [assignedUserId],
+        type: "DEAL",
+        action: notificationAction,
+        title,
+        message:
+          stage === "WON"
+            ? `Deal '${deal.title}' was marked as won.`
+            : stage === "LOST"
+              ? `Deal '${deal.title}' was marked as lost.`
+              : `Deal '${deal.title}' stage changed from ${oldStage} to ${stage}.`,
+        entityType: "DEAL",
+        entityId: dealId,
+      });
+    }
+
+
+    // Activity
     await createActivities(
       [
         {
@@ -657,7 +733,7 @@ export const updateDealStage = async (
       client
     );
 
-    /**
+    /*
      * Future
      *
      * if (stage === "WON") {
@@ -668,19 +744,13 @@ export const updateDealStage = async (
     await client.query("COMMIT");
 
     return result.rows[0];
-
   } catch (error) {
-
     await client.query("ROLLBACK");
 
     throw error;
-
   } finally {
-
     client.release();
-
   }
-
 };
 
 export const deleteDeal = async (
@@ -744,6 +814,7 @@ export const deleteDeal = async (
 export const assignDeals = async (
   organizationId: number,
   currentUserId: number,
+  currentUserName: String,
   dealIds: number[],
   assignedTo: number
 ) => {
@@ -841,6 +912,37 @@ export const assignDeals = async (
       client
     );
 
+    // create notification
+    if (
+      assignedTo !== currentUserId
+    ) {
+      if (dealIds.length === 1) {
+        const deal = dealsResult.rows[0];
+
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "DEAL",
+          action: "ASSIGNED",
+          title: "Deal Assigned",
+          message: `${currentUserName} assigned you a deal.`,
+          entityType: "DEAL",
+          entityId: deal.id,
+        });
+      } else {
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "DEAL",
+          action: "ASSIGNED",
+          title: "Multiple Deals Assigned",
+          message: `${currentUserName} assigned ${dealIds.length} deals to you.`,
+          entityType: null,
+          entityId: null,
+        });
+      }
+    }
+
     await client.query("COMMIT");
 
     return {
@@ -857,5 +959,174 @@ export const assignDeals = async (
 
     client.release();
 
+  }
+};
+
+export const getDealOptions = async (
+  organizationId: number,
+  currentUserId: number,
+  filters?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  },
+  canViewUnassigned = false
+) => {
+  try {
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
+
+    const visibleUsers =
+      await getVisibleUserIds(
+        currentUserId
+      );
+
+    const params: any[] = [
+      visibleUsers,
+      organizationId,
+    ];
+
+    const visibilityCondition =
+      canViewUnassigned
+        ? `
+          (
+            d.assigned_to IS NULL
+            OR d.assigned_to = ANY($1::int[])
+          )
+        `
+        : `
+          d.assigned_to = ANY($1::int[])
+        `;
+
+    let whereClause = `
+      WHERE
+        d.organization_id = $2
+        AND ${visibilityCondition}
+    `;
+
+    if (filters?.search?.trim()) {
+      params.push(
+        `%${filters.search.trim()}%`
+      );
+
+      whereClause += `
+        AND (
+          d.title ILIKE $${params.length}
+
+          OR c.company ILIKE $${params.length}
+
+          OR CONCAT(
+            c.fname,
+            ' ',
+            COALESCE(c.lname, '')
+          ) ILIKE $${params.length}
+
+          OR s.name ILIKE $${params.length}
+        )
+      `;
+    }
+
+    // Total
+    const countResult =
+      await pool.query(
+        `
+        SELECT
+          COUNT(*)::int AS total
+
+        FROM deals d
+
+        INNER JOIN customers c
+          ON c.id = d.customer_id
+
+        INNER JOIN services s
+          ON s.id = d.service_id
+
+        ${whereClause}
+        `,
+        params
+      );
+
+    const total =
+      countResult.rows[0].total;
+
+    // Pagination
+    params.push(limit);
+    params.push(offset);
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          d.id,
+          d.title,
+
+          d.customer_id,
+
+          CONCAT(
+            c.fname,
+            ' ',
+            COALESCE(c.lname, '')
+          ) AS customer_name,
+
+          c.company AS customer_company,
+
+          d.service_id,
+
+          s.name AS service_name,
+
+          d.price,
+          d.stage,
+
+          d.assigned_to,
+          u.fullname AS assigned_to_name
+
+        FROM deals d
+
+        LEFT JOIN users u
+        ON u.id = d.assigned_to
+
+        INNER JOIN customers c
+          ON c.id = d.customer_id
+
+        INNER JOIN services s
+          ON s.id = d.service_id
+
+        ${whereClause}
+
+        ORDER BY
+          d.created_at DESC
+
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
+        `,
+        params
+      );
+
+    return {
+      deals: result.rows,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages:
+          Math.ceil(
+            total / limit
+          ),
+      },
+    };
+  } catch (error) {
+    console.log(
+      "Error fetching deal options",
+      error
+    );
+
+    throw new AppError(
+      "Error fetching deal options",
+      500
+    );
   }
 };

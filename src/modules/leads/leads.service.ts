@@ -11,7 +11,7 @@ import { shiftSqlParams } from "../../shared/helpers/sql.helper";
 import { assertLeadEditable } from "./leads.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
-
+import { createNotifications } from "../notifications/notification.helper";
 
 export const getLeads = async (
   organizationId: number,
@@ -355,6 +355,7 @@ export const updateLeadDetails = async (
 
 export const assignLeads = async (
   currentUserId: number,
+  currentUserName: string,
   leadIds: number[],
   assignedTo: number
 ) => {
@@ -477,6 +478,37 @@ export const assignLeads = async (
       client
     );
 
+    if (
+      assignedTo &&
+      assignedTo !== currentUserId
+    ) {
+      if (leadIds.length === 1) {
+        const lead = leadsResult.rows[0];
+
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "LEAD",
+          action: "ASSIGNED",
+          title: "Lead Assigned",
+          message: `${currentUserName} assigned you a lead.`,
+          entityType: "LEAD",
+          entityId: lead.id,
+        });
+      } else {
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "LEAD",
+          action: "ASSIGNED",
+          title: "Multiple Leads Assigned",
+          message: `${currentUserName} assigned ${leadIds.length} leads to you.`,
+          entityType: null,
+          entityId: null,
+        });
+      }
+    }
+
     await client.query("COMMIT");
 
     return {
@@ -528,11 +560,20 @@ export const updateLeadStatus = async (
 
     // Business rule:
     // Lead must be assigned before conversion
-    if (status === "CONVERTED" && !lead.assigned_to) {
+    if (
+      status === "CONVERTED" &&
+      !lead.assigned_to
+    ) {
       throw new AppError(
         "Assign the lead before converting it.",
         400
       );
+    }
+
+    // Don't do anything if status hasn't changed
+    if (lead.status === status) {
+      await client.query("COMMIT");
+      return lead;
     }
 
     // Update status
@@ -542,7 +583,11 @@ export const updateLeadStatus = async (
       SET
         status = $1,
         updated_at = NOW()
-        ${status === "CONVERTED" ? ", converted_at = NOW()" : ""}
+        ${
+          status === "CONVERTED"
+            ? ", converted_at = NOW()"
+            : ""
+        }
       WHERE
         id = $2
         AND organization_id = $3
@@ -557,7 +602,12 @@ export const updateLeadStatus = async (
 
     const updatedLead = result.rows[0];
 
-    // Create customer if converted
+    const assignedUserId =
+      updatedLead.assigned_to;
+
+    /*
+     * Create customer if converted
+     */
     if (status === "CONVERTED") {
       await createCustomer(
         organizationId,
@@ -569,28 +619,85 @@ export const updateLeadStatus = async (
           phone1: updatedLead.phone1,
           phone2: updatedLead.phone2,
           company: updatedLead.company,
-          assigned_to: updatedLead.assigned_to,
+          assigned_to:
+            updatedLead.assigned_to,
           lead_id: updatedLead.id,
         },
         client
       );
     }
 
-    // Activity log
-    const activity: ActivityInput[] =
-      [
-        {
-          organizationId,
-          entityType: "LEAD",
-          entityId: updatedLead.id,
-          activityType: "STATUS_CHANGED",
-           description: `Status changed from ${lead.status} to ${updatedLead.status}`,
-          createdBy: userId,
-        },
-      ];
+    /*
+     * Lead status notification
+     *
+     * Only notify the assigned user
+     * when they are not the person who
+     * performed the action.
+     */
+    if (
+      assignedUserId &&
+      assignedUserId !== userId
+    ) {
+      let notificationAction:
+        | "STATUS_CHANGED"
+        | "CONVERTED"
+        | "LOST";
+
+      let title: string;
+      let message: string;
+
+      if (status === "CONVERTED") {
+        notificationAction =
+          "CONVERTED";
+
+        title = "Lead Converted";
+
+        message =
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' was converted to a customer.`;
+      } else if (status === "LOST") {
+        notificationAction = "LOST";
+
+        title = "Lead Lost";
+
+        message =
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' was marked as lost.`;
+      } else {
+        notificationAction =
+          "STATUS_CHANGED";
+
+        title = "Lead Status Changed";
+
+        message =
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' status changed from ${lead.status} to ${updatedLead.status}.`;
+      }
+
+      await createNotifications({
+        organizationId,
+        userIds: [assignedUserId],
+        type: "LEAD",
+        action: notificationAction,
+        title,
+        message,
+        entityType: "LEAD",
+        entityId: updatedLead.id,
+      });
+    }
+
+    /*
+     * Activity log
+     */
+    const activity: ActivityInput = {
+      organizationId,
+      entityType: "LEAD",
+      entityId: updatedLead.id,
+      activityType: "STATUS_CHANGED",
+      description:
+        `Status changed from ${lead.status} to ${updatedLead.status}`,
+      createdBy: userId,
+    };
 
     await createActivities(
-      activity,
+      [activity],
       client
     );
 
@@ -602,7 +709,8 @@ export const updateLeadStatus = async (
 
     if (
       error.code === "23505" &&
-      error.constraint === "fk_customers_lead_id"
+      error.constraint ===
+        "fk_customers_lead_id"
     ) {
       throw new AppError(
         "Lead already converted to customer",
@@ -658,5 +766,148 @@ export const deleteLead = async (
     throw error;
   } finally {
     client.release();
+  }
+};
+
+
+export const getLeadOptions = async (
+  organizationId: number,
+  currentUserId: number,
+  filters?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  },
+  canViewUnassigned = false
+) => {
+  try {
+    const {
+      page,
+      limit,
+      offset,
+    } = buildPagination(filters);
+
+    const visibleUsers =
+      await getVisibleUserIds(
+        currentUserId
+      );
+
+    const params: any[] = [
+      visibleUsers,
+      organizationId,
+    ];
+
+    const visibilityCondition =
+      canViewUnassigned
+        ? `
+          (
+            l.assigned_to IS NULL
+            OR l.assigned_to = ANY($1::int[])
+          )
+        `
+        : `
+          l.assigned_to = ANY($1::int[])
+        `;
+
+    let whereClause = `
+      WHERE
+        l.organization_id = $2
+        AND ${visibilityCondition}
+    `;
+
+    if (filters?.search?.trim()) {
+      params.push(
+        `%${filters.search.trim()}%`
+      );
+
+      whereClause += `
+        AND (
+          CONCAT(
+            l.fname,
+            ' ',
+            COALESCE(l.lname, '')
+          ) ILIKE $${params.length}
+
+          OR l.company ILIKE $${params.length}
+
+          OR l.email ILIKE $${params.length}
+
+          OR l.phone1 ILIKE $${params.length}
+        )
+      `;
+    }
+
+    // Total
+    const countResult =
+      await pool.query(
+        `
+        SELECT
+          COUNT(*)::int AS total
+
+        FROM leads l
+
+        ${whereClause}
+        `,
+        params
+      );
+
+    const total =
+      countResult.rows[0].total;
+
+    // Pagination
+    params.push(limit);
+    params.push(offset);
+
+    const result =
+      await pool.query(
+        `
+        SELECT
+          l.id,
+          l.fname,
+          l.lname,
+          l.company,
+          l.email,
+          l.phone1,
+          l.assigned_to,
+          u.fullname AS assigned_to_name
+
+        FROM leads l
+        LEFT JOIN users u
+        ON u.id = l.assigned_to
+
+        ${whereClause}
+
+        ORDER BY
+          l.created_at DESC
+
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
+        `,
+        params
+      );
+
+    return {
+      leads: result.rows,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages:
+          Math.ceil(
+            total / limit
+          ),
+      },
+    };
+  } catch (error) {
+    console.log(
+      "Error fetching lead options",
+      error
+    );
+
+    throw new AppError(
+      "Error fetching lead options",
+      500
+    );
   }
 };

@@ -11,7 +11,7 @@ const app = express();
 // 1. Define your allowed domains
 const allowedOrigins: string[] = [
   CORS_ORIGIN || 'http://localhost:3000',     // Local development
-  'http://127.0.0.1:3000' 
+  'http://127.0.0.1:3000',
 ];
 
 // 2. Configure the dynamic check with proper TypeScript types

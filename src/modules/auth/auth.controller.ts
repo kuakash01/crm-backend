@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import * as authService from "./auth.service";
 
-import {NODE_ENV, COOKIE_EXPIRES_DAYS} from "../../config/env";
+import { NODE_ENV, COOKIE_EXPIRES_DAYS } from "../../config/env";
 
 
 export const register = async (
@@ -55,6 +55,29 @@ export const login = async (
   }
 };
 
+export const logout = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    res.clearCookie("accessToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to logout",
+    });
+  }
+
+}
 
 export const getCurrentUser = async (
   req: Request,

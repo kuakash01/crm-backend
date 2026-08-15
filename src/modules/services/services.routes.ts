@@ -5,7 +5,8 @@ import {
   getServices,
   getServiceById,
   updateService,
-  deleteService
+  deleteService,
+  getServiceOptions
 } from "./services.controller";
 
 import {
@@ -27,6 +28,12 @@ router.get(
   "/",
   authorize("services", "read"),
   getServices
+);
+
+router.get(
+  "/options",
+  authorize("services", "read"),
+  getServiceOptions
 );
 
 router.get(

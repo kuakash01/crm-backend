@@ -1,6 +1,6 @@
 import { Pool, PoolClient } from "pg";
 import { pool } from "../../config/db";
-import { createActivity, createActivities } from "../activities/activites.service";
+import { createActivities } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
 import { validateAssignee, getVisibleUserIds } from "../users/users.service";
 // helpers
@@ -13,7 +13,7 @@ import {
 } from "./customers.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
-
+import { createNotifications } from "../notifications/notification.helper";
 
 
 export const getCustomers = async (
@@ -338,10 +338,13 @@ export const updateCustomerStatus = async (
   status: string,
   currentUserId: number
 ) => {
-
   const customerResult = await pool.query(
     `
-    SELECT status
+    SELECT
+      status,
+      assigned_to,
+      fname,
+      lname
     FROM customers
     WHERE
       id = $1
@@ -349,7 +352,7 @@ export const updateCustomerStatus = async (
     `,
     [
       customerId,
-      organizationId
+      organizationId,
     ]
   );
 
@@ -360,8 +363,10 @@ export const updateCustomerStatus = async (
     );
   }
 
-  const oldStatus =
-    customerResult.rows[0].status;
+  const customer = customerResult.rows[0];
+
+  const oldStatus = customer.status;
+  const assignedUserId = customer.assigned_to;
 
   if (oldStatus === status) {
     throw new AppError(
@@ -384,10 +389,28 @@ export const updateCustomerStatus = async (
     [
       status,
       customerId,
-      organizationId
+      organizationId,
     ]
   );
 
+  // Notify assigned user
+  if (
+    assignedUserId &&
+    assignedUserId !== currentUserId
+  ) {
+    await createNotifications({
+      organizationId,
+      userIds: [assignedUserId],
+      type: "CUSTOMER",
+      action: "STATUS_CHANGED",
+      title: "Customer Status Changed",
+      message: `Customer '${customer.fname} ${customer.lname}' status changed from ${oldStatus} to ${status}.`,
+      entityType: "CUSTOMER",
+      entityId: customerId,
+    });
+  }
+
+  // Activity log
   await createActivities([
     {
       organizationId,
@@ -400,7 +423,6 @@ export const updateCustomerStatus = async (
   ]);
 
   return result.rows[0];
-
 };
 
 export const deleteCustomer = async (
@@ -582,6 +604,35 @@ export const assignCustomer = async (
       client
     );
 
+    // send notification 
+    if (assignedTo !== currentUserId) {
+      if (customerIds.length === 1) {
+        const customer = customerResult.rows[0];
+
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "CUSTOMER",
+          action: "ASSIGNED",
+          title: "Customer Assigned",
+          message: `${currentUserResult.rows[0].fullname} assigned you a customer.`,
+          entityType: "CUSTOMER",
+          entityId: customer.id,
+        });
+      } else {
+        await createNotifications({
+          organizationId,
+          userIds: [assignedTo],
+          type: "CUSTOMER",
+          action: "ASSIGNED",
+          title: "Multiple Customers Assigned",
+          message: `${currentUserResult.rows[0].fullname} assigned ${customerIds.length} customers to you.`,
+          entityType: null,
+          entityId: null,
+        });
+      }
+    }
+
     await client.query("COMMIT");
 
     return {
@@ -736,8 +787,14 @@ export const getCustomerOptions = async (
         c.lname,
         c.company,
         c.email,
-        c.phone1
-      FROM customers c
+        c.phone1,
+        c.assigned_to,
+        u.fullname AS assigned_to_name
+
+FROM customers c
+
+LEFT JOIN users u
+  ON u.id = c.assigned_to
 
       ${whereClause}
 

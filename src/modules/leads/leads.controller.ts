@@ -123,8 +123,9 @@ export const assignLeads = async (
 
     await leadsService.assignLeads(
       req.user.id,
+      req.user.fullname,
       leadIds,
-      assignedTo,
+      assignedTo
     );
 
     res.status(200).json({
@@ -166,3 +167,42 @@ export const updateLeadStatus = async (
 };
 
 
+export const getLeadOptions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result =
+      await leadsService.getLeadOptions(
+        req.user.organization_id,
+        req.user.id,
+        {
+          search:
+            req.query.search
+              ?.toString(),
+
+          page:
+            req.query.page
+              ? Number(req.query.page)
+              : 1,
+
+          limit:
+            req.query.limit
+              ? Number(req.query.limit)
+              : 10,
+        },
+        hasPermission(
+          req.user.permissions,
+          "leads:view_unassigned"
+        )
+      );
+
+    res.status(200).json({
+      status: "success",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

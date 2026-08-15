@@ -13,7 +13,6 @@ router.get(
 router.get(
   "/assignable",
   verifyToken,
-  authorize("leads", "assign"),
   userController.getAssignableUsers
 );
 router.post(

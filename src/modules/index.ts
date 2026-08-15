@@ -9,6 +9,8 @@ import tasksRoutes from "./tasks/tasks.routes";
 import customersRoutes from "./customers/customers.routes";
 import servicesRoutes from "./services/services.routes";
 import dealsRoutes from "./deals/deals.routes";
+import dashboardRoutes from "./dashboard/dashboard.routes";
+import notificationsRoutes from "./notifications/notification.routes";
 const router = express.Router();
 
 
@@ -23,5 +25,7 @@ router.use("/tasks", tasksRoutes);
 router.use("/customers", customersRoutes);
 router.use("/services", servicesRoutes);
 router.use("/deals", dealsRoutes);
+router.use("/dashboard", dashboardRoutes);
+router.use("/notifications", notificationsRoutes);
 
-export default router;
+export default router; 

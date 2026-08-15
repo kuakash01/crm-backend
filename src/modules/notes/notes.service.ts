@@ -1,6 +1,7 @@
 import { pool } from "../../config/db";
-import { createActivity } from "../activities/activites.service";
+import { createActivities } from "../activities/activites.service";
 import { AppError } from "../../shared/errors/AppError";
+import { ActivityInput } from "../activities/activities.types";
 import {
   buildPagination,
   buildPaginationResponse,
@@ -50,52 +51,21 @@ export const createNote = async (
     ]
   );
 
-  await createActivity(
+
+
+  const activity: ActivityInput = {
     organizationId,
     entityType,
     entityId,
-    "NOTE_ADDED",
-    "Added a note",
+    activityType: "NOTE_ADDED",
+    description: "Added a note",
     createdBy
-  );
+  }
+  await createActivities([activity]);
 
   return result.rows[0];
 
 };
-
-// export const getNotes = async (
-//   entityType: string,
-//   entityId: number
-// ) => {
-
-//   const result = await pool.query(
-//     `
-//     SELECT
-//       n.id,
-//       n.note,
-//       n.created_at,
-//       n.updated_at,
-//       u.fullname AS created_by_name
-//     FROM notes n
-//     INNER JOIN users u
-//       ON u.id = n.created_by
-//     WHERE
-//       n.entity_type = $1
-//       AND n.entity_id = $2
-//     ORDER BY
-//       n.created_at DESC
-//     `,
-//     [
-//       entityType,
-//       entityId
-//     ]
-//   );
-
-//   return result.rows;
-
-// };
-
-
 
 
 export const getNotes = async (

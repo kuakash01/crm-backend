@@ -141,7 +141,7 @@ export const login = async (
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
-    console.log("token", token);
+    // console.log("token", token);
 
 
     return {
@@ -160,34 +160,12 @@ export const login = async (
   }
 };
 
-
-// export const getCurrentUser = async (
-//   userId: number
-// ) => {
-//   const result = await pool.query(
-//     `
-//     SELECT
-//       u.id,
-//       u.email,
-//       r.name as role,
-//       u.organization_id
-//     FROM users u join roles r on u.role_id = r.id 
-//     WHERE u.id = $1
-//     `,
-//     [userId]
-//   );
-
-//   if (!result.rows.length) {
-//     throw new AppError(
-//       "User not found",
-//       404
-//     );
-//   }
-
-//   return result.rows[0];
-// };
-
-
+export const logout = async (
+  userId: number,
+  organization_id: number
+) => {
+  return;
+}
 
 export const getCurrentUser = async (
   userId: number

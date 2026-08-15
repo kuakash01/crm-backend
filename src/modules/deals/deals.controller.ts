@@ -226,6 +226,7 @@ export const assignDeals = async (
       await dealsService.assignDeals(
         req.user.organization_id,
         req.user.id,
+        req.user.fullname,
         req.body.dealIds,
         req.body.assignedTo
       );
@@ -242,3 +243,42 @@ export const assignDeals = async (
   }
 
 };
+
+export const getDealOptions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result =
+      await dealsService.getDealOptions(
+        req.user.organization_id,
+        req.user.id,
+        {
+          search:
+            req.query.search?.toString(),
+
+          page:
+            req.query.page
+              ? Number(req.query.page)
+              : 1,
+
+          limit:
+            req.query.limit
+              ? Number(req.query.limit)
+              : 10,
+        },
+        hasPermission(
+          req.user.permissions,
+          "deals:view_unassigned"
+        )
+      );
+
+    res.status(200).json({
+      status: "success",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}; 

@@ -6,6 +6,11 @@ import { verifyToken, authorize } from "../../middleware/auth.middleware";
 router.use(verifyToken);
 
 router.get('/', authorize("leads", "read"), leadsController.getLeads);
+router.get(
+  "/options",
+  authorize("leads", "read"),
+  leadsController.getLeadOptions
+);
 router.post('/', authorize("leads", "create"), leadsController.createLead)
 router.post(
   "/assign",
