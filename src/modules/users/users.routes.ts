@@ -1,5 +1,5 @@
 import express from "express";
-import {verifyToken, authorize} from "../../middleware/auth.middleware";
+import { verifyToken, authorize } from "../../middleware/auth.middleware";
 import * as userController from "./users.controller";
 const router = express.Router();
 
@@ -10,17 +10,41 @@ router.get(
   authorize("users", "read"),
   userController.getUsers
 );
+
+router.get(
+  "/me",
+  verifyToken,
+  userController.getMyProfile
+);
+
 router.get(
   "/assignable",
   verifyToken,
   userController.getAssignableUsers
 );
+
+router.get(
+  "/invitations",
+  verifyToken,
+  userController.getPendingInvitations,
+);
+
 router.post(
   "/",
   verifyToken,
   authorize("users", "create"),
   userController.createUser
 );
+
+
+
+router.post(
+  "/invitations/:id/resend",
+  verifyToken,
+  userController.resendInvitation,
+);
+
+
 
 router.get(
   "/:id",
@@ -29,6 +53,11 @@ router.get(
   userController.getUser
 );
 
+router.patch(
+  "/me",
+  verifyToken,
+  userController.updateMyProfile,
+);
 
 router.patch(
   "/:id",
@@ -37,12 +66,6 @@ router.patch(
   userController.updateUser
 );
 
-router.delete(
-  "/:id",
-  verifyToken,
-  authorize("users", "delete"),
-  userController.deleteUser
-);
 
 router.patch(
   "/:id/status",
@@ -58,6 +81,18 @@ router.patch(
   userController.changeRole
 );
 
+router.delete(
+  "/invitations/:id",
+  verifyToken,
+  userController.cancelInvitation,
+);
+
+router.delete(
+  "/:id",
+  verifyToken,
+  authorize("users", "delete"),
+  userController.deleteUser
+);
 
 
 export default router;

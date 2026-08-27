@@ -1,6 +1,9 @@
 import { Server } from "socket.io";
 import { Server as HttpServer } from "http";
-import { authenticateUser } from "../middleware/auth.middleware";
+import jwt from "jsonwebtoken";
+import { JWT_SECRET, CORS_ORIGIN } from "./env";
+import { pool } from "./db";
+
 
 let io: Server;
 
@@ -9,7 +12,7 @@ export const initializeSocket = (
 ) => {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL,
+      origin: CORS_ORIGIN,
       credentials: true,
     },
   });
@@ -29,12 +32,18 @@ export const initializeSocket = (
       }
 
       const user =
-        await authenticateUser(token);
+        await verifyTokenSocket(token);
+
+      if (!user) {
+        return next(
+          new Error("Unauthorized")
+        );
+      }
 
       socket.data.user = user;
 
       next();
-    } catch (error) {
+    } catch {
       next(
         new Error("Invalid authentication")
       );
@@ -56,7 +65,7 @@ export const initializeSocket = (
 
     socket.on("disconnect", () => {
       console.log(
-        `User ${user.id} disconnected`
+        `User ${user.id} disconnected: ${socket.id}`
       );
     });
   });
@@ -74,10 +83,9 @@ export const getIO = () => {
   return io;
 };
 
-
 const getAccessTokenFromCookie = (
   cookieHeader?: string
-) => {
+): string | null => {
   if (!cookieHeader) {
     return null;
   }
@@ -100,4 +108,48 @@ const getAccessTokenFromCookie = (
       "accessToken=".length
     )
   );
+};
+
+export const verifyTokenSocket = async (
+  token: string
+) => {
+  const decoded = jwt.verify(
+    token,
+    JWT_SECRET
+  ) as {
+    id: number;
+  };
+
+  const user = await authenticateUserSocket(
+    decoded.id
+  );
+
+  return user;
+};
+
+
+const authenticateUserSocket = async (userId: number) => {
+  const result = await pool.query(
+    `
+    SELECT
+      u.id,
+      u.fullname,
+      u.email,
+      u.organization_id,
+      u.role_id,
+      r.name AS role
+    FROM users u
+    LEFT JOIN roles r
+      ON r.id = u.role_id
+    WHERE u.id = $1
+      AND u.is_active = TRUE
+    `,
+    [userId]
+  );
+
+  if (!result.rows.length) {
+    throw new Error("User no longer exists");
+  }
+
+  return result.rows[0];
 };

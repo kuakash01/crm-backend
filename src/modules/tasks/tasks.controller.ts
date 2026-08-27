@@ -154,6 +154,7 @@ export const updateTask = async (
 
     const task = await taskService.updateTask(
       organizationId,
+      req.user.id,
       taskId,
       req.body
     );

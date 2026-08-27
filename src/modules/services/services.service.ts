@@ -1,7 +1,6 @@
 import { pool } from "../../config/db";
 import { AppError } from "../../shared/errors/AppError";
 import { buildPagination } from "../../shared/helpers/pagination.helper";
-import { createNotifications } from "../notifications/notification.helper";
 
 export interface ServiceOption {
   id: number;

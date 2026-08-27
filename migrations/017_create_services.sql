@@ -3,7 +3,7 @@ CREATE TABLE
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    default_price NUMERIC(12, 2),
+    base_price NUMERIC(12, 2),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     organization_id INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW (),

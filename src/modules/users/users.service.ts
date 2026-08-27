@@ -4,6 +4,13 @@ import { AppError } from "../../shared/errors/AppError"
 import bcryptjs from "bcryptjs";
 import { CreateUserDto } from "./users.types";
 import { createNotifications } from "../notifications/notification.helper";
+import crypto from "crypto";
+import { sendEmail } from "../../shared/helpers/sendEmail.helper";
+import {
+  CORS_ORIGIN,
+} from "../../config/env";
+
+import { sendInvitationEmail } from "../../shared/helpers/emailTemplates";
 
 
 export const getUsers = async (
@@ -77,54 +84,213 @@ export const getUser = async (
   return result.rows[0];
 };
 
+// export const createUser = async (
+//   data: CreateUserDto,
+//   organizationId: number
+// ) => {
+
+//   const hashedPassword =
+//     await bcryptjs.hash(
+//       data.password,
+//       10
+//     );
+
+//   const result =
+//     await pool.query(
+//       `
+//       INSERT INTO users
+//       (
+//         fullname,
+//         email,
+//         password,
+//         phone,
+//         role_id,
+//         reports_to,
+//         organization_id
+//       )
+//       VALUES
+//       (
+//         $1,$2,$3,$4,$5,$6,$7
+//       )
+//       RETURNING id
+//       `,
+//       [
+//         data.fullName,
+//         data.email,
+//         hashedPassword,
+//         data.phone,
+//         data.roleId,
+//         data.reports_to,
+//         organizationId,
+//       ]
+//     );
+
+//   return result.rows[0];
+// };
+
+
 export const createUser = async (
   data: CreateUserDto,
-  organizationId: number
+  organizationId: number,
 ) => {
+  const client = await pool.connect();
 
-  const hashedPassword =
-    await bcryptjs.hash(
-      data.password,
-      10
-    );
+  try {
+    await client.query("BEGIN");
 
-  const result =
-    await pool.query(
+    // 1. Check whether the email already belongs
+    // to an existing user.
+    const existingUser = await client.query(
       `
-      INSERT INTO users
-      (
-        fullname,
-        email,
-        password,
-        phone,
-        role_id,
-        reports_to,
-        organization_id
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6,$7
-      )
-      RETURNING id
+      SELECT id
+      FROM users
+      WHERE email = $1
       `,
-      [
-        data.fullName,
-        data.email,
-        hashedPassword,
-        data.phone,
-        data.roleId,
-        data.reports_to,
-        organizationId,
-      ]
+      [data.email],
     );
 
-  return result.rows[0];
+    if (existingUser.rows.length > 0) {
+      throw new AppError(
+        "Email already in use",
+        409,
+      );
+    }
+
+    // 2. Check whether there is already
+    // an active invitation for this email.
+    const existingInvitation =
+      await client.query(
+        `
+        SELECT id
+        FROM user_invitations
+        WHERE
+          organization_id = $1
+          AND email = $2
+          AND used_at IS NULL
+          AND revoked_at IS NULL
+          AND expires_at > NOW()
+        LIMIT 1
+        `,
+        [organizationId, data.email],
+      );
+
+    if (existingInvitation.rows.length > 0) {
+      throw new AppError(
+        "An active invitation already exists for this email",
+        409,
+      );
+    }
+
+    // 3. Generate a secure invitation token.
+    const invitationToken = crypto
+      .randomBytes(32)
+      .toString("hex");
+
+    // 4. Store only the token hash.
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(invitationToken)
+      .digest("hex");
+
+    // 5. Store pending user information.
+    const invitationResult =
+      await client.query(
+        `
+        INSERT INTO user_invitations (
+          organization_id,
+          email,
+          full_name,
+          phone,
+          role_id,
+          reports_to,
+          token_hash,
+          expires_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          NOW() + INTERVAL '24 hours'
+        )
+        RETURNING
+          id,
+          email,
+          full_name,
+          phone,
+          role_id,
+          reports_to
+        `,
+        [
+          organizationId,
+          data.email,
+          data.fullName,
+          data.phone,
+          data.roleId,
+          data.reportsTo,
+          tokenHash,
+        ],
+      );
+
+    const invitation =
+      invitationResult.rows[0];
+
+    // 6. Commit database transaction.
+    await client.query("COMMIT");
+
+    // 7. Build frontend invitation URL.
+    const invitationUrl =
+      `${CORS_ORIGIN}/invite?token=${invitationToken}`;
+
+    // 8. Send invitation email.
+    await sendInvitationEmail(
+      invitation.email,
+      invitationUrl,
+    );
+
+    return {
+      id: invitation.id,
+      fullName: invitation.full_name,
+      email: invitation.email,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Transaction may already be committed.
+    }
+
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    console.error(
+      "Error creating user invitation:",
+      error,
+    );
+
+    throw new AppError(
+      "Failed to create user invitation",
+      500,
+    );
+  } finally {
+    client.release();
+  }
 };
+
 
 export const updateUser = async (
   id: number,
   organizationId: number,
-  data: any
+  data: {
+    fullName: string;
+    phone: string;
+    reportsTo: number;
+    roleId: number;
+  }
 ) => {
 
   await pool.query(
@@ -132,9 +298,9 @@ export const updateUser = async (
     UPDATE users
     SET
       fullname = $1,
-      email = $2,
-      phone = $3,
-      reports_to = $4
+      phone = $2,
+      reports_to = $3,
+      role_id = $4
     WHERE
       id = $5
       AND
@@ -142,9 +308,9 @@ export const updateUser = async (
     `,
     [
       data.fullName,
-      data.email,
       data.phone,
       data.reportsTo,
+      data.roleId,
       id,
       organizationId,
     ]
@@ -339,7 +505,7 @@ export const deleteUser = async (
   );
 };
 
-// for froented get all descendent users
+// helpers
 export const getAssignableUsers = async (
   userId: number) => {
 
@@ -486,22 +652,338 @@ export const getVisibleUserIds = async (
 
 };
 
-export const userHasChildren = async (
-  userId: number
-) => {
 
+export const getPendingInvitations = async (
+  organizationId: number,
+) => {
   const result = await pool.query(
     `
-    SELECT EXISTS (
-      SELECT 1
-      FROM users
-      WHERE reports_to = $1
-    ) AS has_children
+    SELECT
+      ui.id,
+      ui.full_name,
+      ui.email,
+      ui.phone,
+      ui.expires_at,
+      ui.created_at,
+      r.name AS role,
+      rt.fullname AS reports_to
+    FROM user_invitations ui
+
+    JOIN roles r
+      ON ui.role_id = r.id
+
+    LEFT JOIN users rt
+      ON ui.reports_to = rt.id
+
+    WHERE
+      ui.organization_id = $1
+      AND ui.used_at IS NULL
+      AND ui.revoked_at IS NULL
+
+    ORDER BY ui.created_at DESC
     `,
-    [userId]
+    [organizationId],
   );
 
-  return result.rows[0].has_children;
-
+  return result.rows.map((invitation) => ({
+    id: invitation.id,
+    fullName: invitation.full_name,
+    email: invitation.email,
+    phone: invitation.phone,
+    role: invitation.role,
+    reportsTo: invitation.reports_to,
+    expiresAt: invitation.expires_at,
+    createdAt: invitation.created_at,
+    status:
+      new Date(invitation.expires_at) < new Date()
+        ? "expired"
+        : "pending",
+  }));
 };
+
+export const resendInvitation = async (
+  invitationId: number,
+  organizationId: number,
+) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `
+      SELECT
+        ui.*,
+        o.name AS organization,
+        r.name AS role
+      FROM user_invitations ui
+      JOIN organizations o
+        ON ui.organization_id = o.id
+      JOIN roles r
+        ON ui.role_id = r.id
+      WHERE
+        ui.id = $1
+        AND ui.organization_id = $2
+        AND ui.used_at IS NULL
+        AND ui.revoked_at IS NULL
+      FOR UPDATE
+      `,
+      [invitationId, organizationId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError(
+        "Invitation not found",
+        404,
+      );
+    }
+
+    const invitation = result.rows[0];
+
+    const invitationToken = crypto
+      .randomBytes(32)
+      .toString("hex");
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(invitationToken)
+      .digest("hex");
+
+    // Revoke old invitation
+    await client.query(
+      `
+      UPDATE user_invitations
+      SET revoked_at = NOW()
+      WHERE id = $1
+      `,
+      [invitation.id],
+    );
+
+    // Create new invitation
+    const newInvitation =
+      await client.query(
+        `
+        INSERT INTO user_invitations (
+          organization_id,
+          email,
+          full_name,
+          phone,
+          role_id,
+          reports_to,
+          token_hash,
+          expires_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          NOW() + INTERVAL '24 hours'
+        )
+        RETURNING id
+        `,
+        [
+          invitation.organization_id,
+          invitation.email,
+          invitation.full_name,
+          invitation.phone,
+          invitation.role_id,
+          invitation.reports_to,
+          tokenHash,
+        ],
+      );
+
+    await client.query("COMMIT");
+
+    const invitationUrl =
+      `${CORS_ORIGIN}/invite?token=${invitationToken}`;
+
+    await sendInvitationEmail(
+      invitation.email,
+      invitationUrl,
+    );
+
+    return {
+      id: newInvitation.rows[0].id,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch { }
+
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError(
+      "Failed to resend invitation",
+      500,
+    );
+  } finally {
+    client.release();
+  }
+};
+
+export const cancelInvitation = async (
+  invitationId: number,
+  organizationId: number,
+) => {
+  const result = await pool.query(
+    `
+    UPDATE user_invitations
+    SET revoked_at = NOW()
+    WHERE
+      id = $1
+      AND organization_id = $2
+      AND used_at IS NULL
+      AND revoked_at IS NULL
+    RETURNING id
+    `,
+    [invitationId, organizationId],
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError(
+      "Invitation not found",
+      404,
+    );
+  }
+
+  return result.rows[0];
+};
+
+
+export const getMyProfile = async (
+  userId: number,
+) => {
+  const result = await pool.query(
+    `
+    SELECT
+      u.id,
+      u.fullname,
+      u.email,
+      u.phone,
+      u.profile_pic,
+      u.email_verified,
+      u.is_active,
+      u.organization_id,
+      o.name AS organization,
+      u.role_id,
+      r.name AS role,
+      u.reports_to,
+      rt.fullname AS reports_to_name,
+      u.created_at,
+      u.updated_at
+    FROM users u
+
+    JOIN organizations o
+      ON u.organization_id = o.id
+
+    JOIN roles r
+      ON u.role_id = r.id
+
+    LEFT JOIN users rt
+      ON u.reports_to = rt.id
+
+    WHERE u.id = $1
+    `,
+    [userId],
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError(
+      "User profile not found",
+      404,
+    );
+  }
+
+  const user = result.rows[0];
+
+  return {
+    id: user.id,
+    fullName: user.fullname,
+    email: user.email,
+    phone: user.phone,
+    profilePic: user.profile_pic,
+    emailVerified: user.email_verified,
+    isActive: user.is_active,
+    organizationId: user.organization_id,
+    organization: user.organization,
+    roleId: user.role_id,
+    role: user.role,
+    reportsTo: user.reports_to,
+    reportsToName: user.reports_to_name,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
+  };
+};
+
+export const updateMyProfile = async (
+  userId: number,
+  data: {
+    fullName: string;
+    phone: string;
+    profilePic?: string | null;
+  },
+) => {
+  const result = await pool.query(
+    `
+    UPDATE users
+    SET
+      fullname = $1,
+      phone = $2,
+      profile_pic = $3,
+      updated_at = NOW()
+    WHERE id = $4
+    RETURNING
+      id,
+      fullname,
+      email,
+      phone,
+      profile_pic,
+      updated_at
+    `,
+    [
+      data.fullName,
+      data.phone,
+      data.profilePic ?? null,
+      userId,
+    ],
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError(
+      "User profile not found",
+      404,
+    );
+  }
+
+  const user = result.rows[0];
+
+  return {
+    id: user.id,
+    fullName: user.fullname,
+    email: user.email,
+    phone: user.phone,
+    profilePic: user.profile_pic,
+    updatedAt: user.updated_at,
+  };
+};
+
+
+// export const userHasChildren = async (
+//   userId: number
+// ) => {
+
+//   const result = await pool.query(
+//     `
+//     SELECT EXISTS (
+//       SELECT 1
+//       FROM users
+//       WHERE reports_to = $1
+//     ) AS has_children
+//     `,
+//     [userId]
+//   );
+
+//   return result.rows[0].has_children;
+
+// };
 

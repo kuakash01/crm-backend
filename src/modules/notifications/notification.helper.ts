@@ -1,59 +1,21 @@
 import { pool } from "../../config/db";
-import { NotificationType, NotificationAction } from "./notification.types";
+import {
+  NotificationType,
+  NotificationAction,
+} from "./notification.types";
+
+import { getIO } from "../../config/socket";
 
 interface CreateNotificationParams {
   organizationId: number;
-  userId: number;
-
+  userIds: number[];
   type: NotificationType;
-
   action: NotificationAction;
-
   title: string;
   message: string;
-
   entityType?: string | null;
   entityId?: number | null;
 }
-
-export const createNotification = async ({
-  organizationId,
-  userId,
-  type,
-  action,
-  title,
-  message,
-  entityType = null,
-  entityId = null,
-}: CreateNotificationParams) => {
-  await pool.query(
-    `
-    INSERT INTO notifications (
-      organization_id,
-      user_id,
-      type,
-      action,
-      title,
-      message,
-      entity_type,
-      entity_id
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8
-    )
-    `,
-    [
-      organizationId,
-      userId,
-      type,
-      action,
-      title,
-      message,
-      entityType,
-      entityId,
-    ]
-  );
-};
 
 export const createNotifications = async ({
   organizationId,
@@ -64,25 +26,12 @@ export const createNotifications = async ({
   message,
   entityType = null,
   entityId = null,
-}: {
-  organizationId: number;
-  userIds: number[];
-
-  type: NotificationType;
-
-  action: NotificationAction;
-
-  title: string;
-  message: string;
-
-  entityType?: string | null;
-  entityId?: number | null;
-}) => {
+}: CreateNotificationParams) => {
   if (!userIds.length) {
-    return;
+    return [];
   }
 
-  await pool.query(
+  const result = await pool.query(
     `
     INSERT INTO notifications (
       organization_id,
@@ -103,6 +52,18 @@ export const createNotifications = async ({
       $6,
       $7,
       $8
+    RETURNING
+      id,
+      organization_id,
+      user_id,
+      type,
+      action,
+      title,
+      message,
+      entity_type,
+      entity_id,
+      is_read,
+      created_at
     `,
     [
       organizationId,
@@ -115,4 +76,17 @@ export const createNotifications = async ({
       entityId,
     ]
   );
+
+  const notifications = result.rows;
+
+  const io = getIO();
+
+  for (const notification of notifications) {
+    io.to(`user:${notification.user_id}`).emit(
+      "notification:new",
+      notification
+    );
+  }
+
+  return notifications;
 };

@@ -6,15 +6,15 @@ CREATE TABLE leads(
   phone1 VARCHAR(20) NOT NULL check (phone1 ~ '^\+?[0-9]{7,15}$'),
   phone2 VARCHAR(20) check (phone2 ~ '^\+?[0-9]{7,15}$'),
   company VARCHAR(100),
-  status lead_status NOT NULL,
-  source lead_source NOT NULL DEFAULT 'NEW',
+  status lead_status NOT NULL DEFAULT 'NEW',
+  source lead_source NOT NULL,
   assigned_to INTEGER,
   organization_id INTEGER NOT NULL,
   converted_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
    CONSTRAINT fk_leads_assigned_to_users 
-    FOREIGN KEY (assigned_to) 
-    REFERENCES users(id) 
-    ON DELETE CASCADE
+    FOREIGN KEY (assigned_to)
+REFERENCES users(id)
+ON DELETE SET NULL
 );

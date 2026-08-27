@@ -8,6 +8,6 @@ CREATE TYPE notification_action AS ENUM (
     'WON',
     'LOST',
     'DUE',
-    'OVERDUE'
+    'OVERDUE',
     'STATUS_CHANGED'
 );

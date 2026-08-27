@@ -152,7 +152,8 @@ export const updateLeadStatus = async (
         Number(req.params.id),
         Number(req.user.id),
         Number(req.user.organization_id),
-        status
+        status,
+        req.user.fullname
       );
 
     res.status(200).json({

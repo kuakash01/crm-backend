@@ -16,7 +16,16 @@ export const getAllNotifications = async (
 
     const notifications = await getNotifications(
       organization_id,
-      id
+      id,
+      {
+        page: req.query.page
+          ? Number(req.query.page)
+          : 1,
+
+        limit: req.query.limit
+          ? Number(req.query.limit)
+          : 10,
+      }
     );
 
     res.status(200).json({

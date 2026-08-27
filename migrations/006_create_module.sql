@@ -4,13 +4,18 @@ CREATE TABLE
     name VARCHAR(100) UNIQUE NOT NULL
   );
 
-INSERT INTO
-  modules(name)
+-- bare minimum data to run application
+INSERT INTO modules(name)
 VALUES
-  ('leads'),
-  ('customers'),
-  ('tasks'),
-  ('notes'),
-  ('calendar'),
-  ('chat'),
-  ('analytics')
+    ('leads'),
+    ('customers'),
+    ('tasks'),
+    ('notes'),
+    ('calendar'),
+    ('chat'),
+    ('analytics'),
+    ('roles'),
+    ('users'),
+    ('deals'),
+    ('services');
+

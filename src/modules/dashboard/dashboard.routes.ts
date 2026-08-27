@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { authorize, verifyToken } from "../../middleware/auth.middleware";
+import {verifyToken } from "../../middleware/auth.middleware";
 
 import { getDashboard } from "./dashboard.controller";
 

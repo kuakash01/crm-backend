@@ -533,7 +533,8 @@ export const updateLeadStatus = async (
   leadId: number,
   userId: number,
   organizationId: number,
-  status: string
+  status: string,
+  userName: string
 ) => {
   const client = await pool.connect();
 
@@ -653,14 +654,14 @@ export const updateLeadStatus = async (
         title = "Lead Converted";
 
         message =
-          `Lead '${updatedLead.fname} ${updatedLead.lname}' was converted to a customer.`;
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' was converted to a customer by ${userName}.`;
       } else if (status === "LOST") {
         notificationAction = "LOST";
 
         title = "Lead Lost";
 
         message =
-          `Lead '${updatedLead.fname} ${updatedLead.lname}' was marked as lost.`;
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' was marked as lost by ${userName}.`;
       } else {
         notificationAction =
           "STATUS_CHANGED";
@@ -668,7 +669,7 @@ export const updateLeadStatus = async (
         title = "Lead Status Changed";
 
         message =
-          `Lead '${updatedLead.fname} ${updatedLead.lname}' status changed from ${lead.status} to ${updatedLead.status}.`;
+          `Lead '${updatedLead.fname} ${updatedLead.lname}' status changed from ${lead.status} to ${updatedLead.status} by ${userName}.`;
       }
 
       await createNotifications({
