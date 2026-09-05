@@ -19,11 +19,16 @@ export const initializeSocket = (
 
   io.use(async (socket, next) => {
     try {
-      const cookieHeader =
-        socket.handshake.headers.cookie;
+      // In production (Vercel + Render), the frontend fetches a token via
+      // the Next.js proxy and passes it here as socket.auth.token to avoid
+      // cross-domain HttpOnly cookie scoping issues.
+      // In local dev, the cookie path is used as fallback.
+      const authToken = socket.handshake.auth?.token as string | undefined;
 
-      const token =
-        getAccessTokenFromCookie(cookieHeader);
+      const cookieHeader = socket.handshake.headers.cookie;
+      const cookieToken = getAccessTokenFromCookie(cookieHeader);
+
+      const token = authToken || cookieToken;
 
       if (!token) {
         return next(

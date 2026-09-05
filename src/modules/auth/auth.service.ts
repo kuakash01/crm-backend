@@ -12,6 +12,7 @@ import {
 } from "../../config/env";
 
 import { verifyEmailTemplate, sendPasswordResetEmail } from "../../shared/helpers/emailTemplates"
+import { isDemoAccount } from "../../shared/helpers/demo.helper";
 
 
 export function generateOtp(): string {
@@ -545,7 +546,7 @@ export const login = async (
       );
     }
 
-    if (!user.email_verified) {
+    if (!user.email_verified && !isDemoAccount(user.email)) {
       throw new AppError(
         "Please verify your email before logging in",
         403,
@@ -657,6 +658,7 @@ export const getCurrentUser = async (
 
   return {
     ...user,
+    isDemo: isDemoAccount(user.email),
     permissions,
   };
 };
@@ -949,6 +951,13 @@ export const forgotPassword = async (
   const client = await pool.connect();
 
   try {
+    if (isDemoAccount(email)) {
+      throw new AppError(
+        "Action disabled: Password reset is not permitted for demo accounts.",
+        403,
+      );
+    }
+
     await client.query("BEGIN");
 
     const result = await client.query(
@@ -1044,6 +1053,13 @@ export const resetPassword = async (
   const client = await pool.connect();
 
   try {
+    if (isDemoAccount(email)) {
+      throw new AppError(
+        "Action disabled: Password reset is not permitted for demo accounts.",
+        403,
+      );
+    }
+
     await client.query("BEGIN");
 
     // 1. Find user
@@ -1220,7 +1236,7 @@ export const changePassword = async (
 ) => {
   const result = await pool.query(
     `
-    SELECT password
+    SELECT id, email, password
     FROM users
     WHERE id = $1
       AND is_active = TRUE
@@ -1236,6 +1252,13 @@ export const changePassword = async (
   }
 
   const user = result.rows[0];
+
+  if (isDemoAccount(user.email)) {
+    throw new AppError(
+      "Action disabled: Demo account password cannot be modified to preserve portfolio demo access.",
+      403,
+    );
+  }
 
   const isMatch = await bcryptjs.compare(
     currentPassword,

@@ -11,6 +11,7 @@ import {
 } from "../../config/env";
 
 import { sendInvitationEmail } from "../../shared/helpers/emailTemplates";
+import { isDemoAccount } from "../../shared/helpers/demo.helper";
 
 
 export const getUsers = async (
@@ -292,6 +293,16 @@ export const updateUser = async (
     roleId: number;
   }
 ) => {
+  const targetUser = await pool.query(
+    `SELECT email FROM users WHERE id = $1 AND organization_id = $2`,
+    [id, organizationId]
+  );
+  if (targetUser.rows.length && isDemoAccount(targetUser.rows[0].email)) {
+    throw new AppError(
+      "Action disabled: Demo account is protected and cannot be modified.",
+      403,
+    );
+  }
 
   await pool.query(
     `
@@ -346,6 +357,13 @@ export const changeRole = async (
     throw new AppError(
       "User not found",
       404
+    );
+  }
+
+  if (isDemoAccount(userResult.rows[0].email)) {
+    throw new AppError(
+      "Action disabled: Role of demo account cannot be changed.",
+      403,
     );
   }
 
@@ -442,6 +460,13 @@ export const changeStatus = async (
     );
   }
 
+  if (isDemoAccount(userResult.rows[0].email)) {
+    throw new AppError(
+      "Action disabled: Demo account status cannot be changed.",
+      403,
+    );
+  }
+
   const user = userResult.rows[0];
 
   if (user.is_active === isActive) {
@@ -487,9 +512,16 @@ export const deleteUser = async (
   id: number,
   organizationId: number
 ) => {
-
-
-
+  const targetUser = await pool.query(
+    `SELECT email FROM users WHERE id = $1 AND organization_id = $2`,
+    [id, organizationId]
+  );
+  if (targetUser.rows.length && isDemoAccount(targetUser.rows[0].email)) {
+    throw new AppError(
+      "Action disabled: Demo accounts cannot be deleted.",
+      403,
+    );
+  }
   await pool.query(
     `
     DELETE FROM users
@@ -912,6 +944,7 @@ export const getMyProfile = async (
     reportsToName: user.reports_to_name,
     createdAt: user.created_at,
     updatedAt: user.updated_at,
+    isDemo: isDemoAccount(user.email),
   };
 };
 
@@ -923,6 +956,16 @@ export const updateMyProfile = async (
     profilePic?: string | null;
   },
 ) => {
+  const userCheck = await pool.query(
+    `SELECT email FROM users WHERE id = $1`,
+    [userId]
+  );
+  if (userCheck.rows.length && isDemoAccount(userCheck.rows[0].email)) {
+    throw new AppError(
+      "Action disabled: Demo account profile is locked to preserve portfolio presentation.",
+      403,
+    );
+  }
   const result = await pool.query(
     `
     UPDATE users

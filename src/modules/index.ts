@@ -31,7 +31,7 @@ router.use("/deals", dealsRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/notifications", notificationsRoutes);
 
-router.use("/health", (req: Request, res: Response) => {
+router.get("/health", (req: Request, res: Response) => {
     res.json({ message: "OK" });
 });
 

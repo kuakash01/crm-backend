@@ -316,6 +316,32 @@ export const changePassword = async (
 
 
 
+export const getSocketToken = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const token = req.cookies?.accessToken;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      token,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get socket token",
+    });
+  }
+};
+
 // export const verifyLoginOtp = async (
 //   req: Request,
 //   res: Response,
