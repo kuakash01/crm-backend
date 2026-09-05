@@ -164,8 +164,8 @@ BREVO_FROM_NAME=CRM Platform
 ### 1. Clone and install
 
 ```bash
-git clone <your-repository-url>
-cd CRM/backend
+git clone https://github.com/kuakash01/crm-backend.git
+cd crm-backend
 npm install
 ```
 

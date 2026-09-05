@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const deals_controller_1 = require("./deals.controller");
+const auth_middleware_1 = require("../../middleware/auth.middleware");
+const router = express_1.default.Router();
+router.use(auth_middleware_1.verifyToken);
+router.post("/", (0, auth_middleware_1.authorize)("deals", "create"), deals_controller_1.createDeal);
+router.get("/", (0, auth_middleware_1.authorize)("deals", "read"), deals_controller_1.getDeals);
+router.get("/options", (0, auth_middleware_1.authorize)("deals", "read"), deals_controller_1.getDealOptions);
+router.get("/pipeline", (0, auth_middleware_1.authorize)("deals", "read"), deals_controller_1.getPipelineDeals);
+router.get("/:id", (0, auth_middleware_1.authorize)("deals", "read"), deals_controller_1.getDealById);
+router.patch("/assign", (0, auth_middleware_1.authorize)("deals", "assign"), deals_controller_1.assignDeals);
+router.patch("/:id", (0, auth_middleware_1.authorize)("deals", "update"), deals_controller_1.updateDeal);
+router.patch("/:id/stage", (0, auth_middleware_1.authorize)("deals", "update"), deals_controller_1.updateDealStage);
+router.delete("/:id", (0, auth_middleware_1.authorize)("deals", "delete"), deals_controller_1.deleteDeal);
+exports.default = router;

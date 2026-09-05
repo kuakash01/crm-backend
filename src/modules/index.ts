@@ -11,6 +11,9 @@ import servicesRoutes from "./services/services.routes";
 import dealsRoutes from "./deals/deals.routes";
 import dashboardRoutes from "./dashboard/dashboard.routes";
 import notificationsRoutes from "./notifications/notification.routes";
+
+import type { Request, Response } from "express";
+
 const router = express.Router();
 
 
@@ -27,5 +30,9 @@ router.use("/services", servicesRoutes);
 router.use("/deals", dealsRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/notifications", notificationsRoutes);
+
+router.use("/health", (req: Request, res: Response) => {
+    res.json({ message: "OK" });
+});
 
 export default router; 

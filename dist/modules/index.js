@@ -1,0 +1,33 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const auth_routes_1 = __importDefault(require("./auth/auth.routes"));
+const leads_routes_1 = __importDefault(require("./leads/leads.routes"));
+const roles_routes_1 = __importDefault(require("./roles/roles.routes"));
+const users_routes_1 = __importDefault(require("./users/users.routes"));
+const activities_routes_1 = __importDefault(require("./activities/activities.routes"));
+const notes_routes_1 = __importDefault(require("./notes/notes.routes"));
+const tasks_routes_1 = __importDefault(require("./tasks/tasks.routes"));
+const customers_routes_1 = __importDefault(require("./customers/customers.routes"));
+const services_routes_1 = __importDefault(require("./services/services.routes"));
+const deals_routes_1 = __importDefault(require("./deals/deals.routes"));
+const dashboard_routes_1 = __importDefault(require("./dashboard/dashboard.routes"));
+const notification_routes_1 = __importDefault(require("./notifications/notification.routes"));
+const router = express_1.default.Router();
+// Register module routes
+router.use("/auth", auth_routes_1.default);
+router.use("/leads", leads_routes_1.default);
+router.use("/roles", roles_routes_1.default);
+router.use("/users", users_routes_1.default);
+router.use("/activities", activities_routes_1.default);
+router.use("/notes", notes_routes_1.default);
+router.use("/tasks", tasks_routes_1.default);
+router.use("/customers", customers_routes_1.default);
+router.use("/services", services_routes_1.default);
+router.use("/deals", deals_routes_1.default);
+router.use("/dashboard", dashboard_routes_1.default);
+router.use("/notifications", notification_routes_1.default);
+exports.default = router;
