@@ -2,6 +2,7 @@ import { pool } from "../../config/db";
 import { Pool, PoolClient } from "pg";
 import { buildPagination, PaginationOptions, buildPaginationResponse } from "../../shared/helpers/pagination.helper";
 import { ActivityInput } from "./activities.types";
+import { emitDashboardUpdate } from "../../config/socket";
 
 
 export const createActivities = async (
@@ -49,7 +50,20 @@ export const createActivities = async (
     values
   );
 
-  return result.rows;
+  const rows = result.rows;
+
+  // Broadcast dashboard update for the activities
+  const orgIds = new Set(activities.map((a) => a.organizationId));
+  for (const orgId of orgIds) {
+    const firstAct = activities.find((a) => a.organizationId === orgId);
+    emitDashboardUpdate(orgId, {
+      entityType: firstAct?.entityType || "ACTIVITY",
+      entityId: firstAct?.entityId,
+      action: firstAct?.activityType || "ACTIVITY_LOGGED",
+    });
+  }
+
+  return rows;
 };
 
 

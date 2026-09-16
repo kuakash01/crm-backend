@@ -17,4 +17,5 @@ router.post("/register", auth_controller_1.register);
 router.post("/login", auth_controller_1.login);
 router.get("/logout", auth_controller_1.logout);
 router.get("/me", auth_middleware_1.verifyToken, auth_controller_1.getCurrentUser);
+router.get("/socket-token", auth_middleware_1.verifyToken, auth_controller_1.getSocketToken);
 exports.default = router;

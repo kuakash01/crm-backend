@@ -46,6 +46,7 @@ const AppError_1 = require("../../shared/errors/AppError");
 const crypto_1 = __importStar(require("crypto"));
 const env_1 = require("../../config/env");
 const emailTemplates_1 = require("../../shared/helpers/emailTemplates");
+const demo_helper_1 = require("../../shared/helpers/demo.helper");
 function generateOtp() {
     return (0, crypto_1.randomInt)(100000, 1000000).toString();
 }
@@ -413,7 +414,7 @@ const login = async (email, password) => {
         if (!user) {
             throw new AppError_1.AppError("Invalid credentials", 401);
         }
-        if (!user.email_verified) {
+        if (!user.email_verified && !(0, demo_helper_1.isDemoAccount)(user.email)) {
             throw new AppError_1.AppError("Please verify your email before logging in", 403);
         }
         const isMatch = await bcryptjs_1.default.compare(password, user.password);
@@ -480,6 +481,7 @@ const getCurrentUser = async (userId) => {
     const permissions = permissionsResult.rows.map((permission) => `${permission.module}:${permission.action}`);
     return {
         ...user,
+        isDemo: (0, demo_helper_1.isDemoAccount)(user.email),
         permissions,
     };
 };
@@ -678,6 +680,9 @@ exports.acceptInvitation = acceptInvitation;
 const forgotPassword = async (email) => {
     const client = await db_1.pool.connect();
     try {
+        if ((0, demo_helper_1.isDemoAccount)(email)) {
+            throw new AppError_1.AppError("Action disabled: Password reset is not permitted for demo accounts.", 403);
+        }
         await client.query("BEGIN");
         const result = await client.query(`
       SELECT id, email, is_active
@@ -744,6 +749,9 @@ exports.forgotPassword = forgotPassword;
 const resetPassword = async (email, otp, newPassword) => {
     const client = await db_1.pool.connect();
     try {
+        if ((0, demo_helper_1.isDemoAccount)(email)) {
+            throw new AppError_1.AppError("Action disabled: Password reset is not permitted for demo accounts.", 403);
+        }
         await client.query("BEGIN");
         // 1. Find user
         const userResult = await client.query(`
@@ -843,7 +851,7 @@ const resetPassword = async (email, otp, newPassword) => {
 exports.resetPassword = resetPassword;
 const changePassword = async (userId, currentPassword, newPassword) => {
     const result = await db_1.pool.query(`
-    SELECT password
+    SELECT id, email, password
     FROM users
     WHERE id = $1
       AND is_active = TRUE
@@ -852,6 +860,9 @@ const changePassword = async (userId, currentPassword, newPassword) => {
         throw new AppError_1.AppError("User not found", 404);
     }
     const user = result.rows[0];
+    if ((0, demo_helper_1.isDemoAccount)(user.email)) {
+        throw new AppError_1.AppError("Action disabled: Demo account password cannot be modified to preserve portfolio demo access.", 403);
+    }
     const isMatch = await bcryptjs_1.default.compare(currentPassword, user.password);
     if (!isMatch) {
         throw new AppError_1.AppError("Current password is incorrect", 400);

@@ -10,6 +10,7 @@ const pagination_helper_1 = require("../../shared/helpers/pagination.helper");
 const sql_helper_1 = require("../../shared/helpers/sql.helper");
 const entity_relations_service_1 = require("../../shared/services/entity-relations.service");
 const notification_helper_1 = require("../notifications/notification.helper");
+const socket_1 = require("../../config/socket");
 const createDeal = async (organizationId, currentUserId, data) => {
     const client = await db_1.pool.connect();
     try {
@@ -82,6 +83,11 @@ const createDeal = async (organizationId, currentUserId, data) => {
             });
         }
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "DEAL",
+            entityId: result.rows[0].id,
+            action: "CREATED",
+        });
         return result.rows[0];
     }
     catch (error) {
@@ -373,6 +379,11 @@ const updateDeal = async (dealId, organizationId, currentUserId, role, data) => 
             },
         ], client);
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "DEAL",
+            entityId: dealId,
+            action: "UPDATED",
+        });
         // Return the same DTO as GET /deals/:id
         return await (0, exports.getDealById)(dealId, organizationId, currentUserId, role);
     }
@@ -476,6 +487,11 @@ const updateDealStage = async (dealId, organizationId, currentUserId, stage) => 
          * }
          */
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "DEAL",
+            entityId: dealId,
+            action: stage,
+        });
         return result.rows[0];
     }
     catch (error) {
@@ -507,6 +523,11 @@ const deleteDeal = async (dealId, organizationId) => {
         }
         await (0, entity_relations_service_1.deleteEntityRelations)(organizationId, "DEAL", dealId, client);
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "DEAL",
+            entityId: dealId,
+            action: "DELETED",
+        });
         return result.rows[0];
     }
     catch (error) {
@@ -604,6 +625,10 @@ const assignDeals = async (organizationId, currentUserId, currentUserName, dealI
             }
         }
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "DEAL",
+            action: "ASSIGNED",
+        });
         return {
             updatedCount: dealIds.length,
         };

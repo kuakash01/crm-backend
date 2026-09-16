@@ -12,6 +12,7 @@ import { assertLeadEditable } from "./leads.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
 import { createNotifications } from "../notifications/notification.helper";
+import { emitDashboardUpdate } from "../../config/socket";
 
 export const getLeads = async (
   organizationId: number,
@@ -221,6 +222,12 @@ export const createLead = async (
     }
     await createActivities([activity]);
 
+    emitDashboardUpdate(organizationId, {
+      entityType: "LEAD",
+      entityId: result.rows[0].id,
+      action: "CREATED",
+    });
+
     // Returning the single created object instead of the whole rows array is usually cleaner
     return result.rows[0];
 
@@ -349,6 +356,12 @@ export const updateLeadDetails = async (
       },
     ]
   );
+
+  emitDashboardUpdate(organizationId, {
+    entityType: "LEAD",
+    entityId: leadId,
+    action: "UPDATED",
+  });
 
   return result.rows[0];
 };
@@ -510,6 +523,11 @@ export const assignLeads = async (
     }
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "LEAD",
+      action: "ASSIGNED",
+    });
 
     return {
       assignedTo,
@@ -704,6 +722,12 @@ export const updateLeadStatus = async (
 
     await client.query("COMMIT");
 
+    emitDashboardUpdate(organizationId, {
+      entityType: "LEAD",
+      entityId: leadId,
+      action: updatedLead.status,
+    });
+
     return updatedLead;
   } catch (error: any) {
     await client.query("ROLLBACK");
@@ -760,6 +784,12 @@ export const deleteLead = async (
     }
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "LEAD",
+      entityId: leadId,
+      action: "DELETED",
+    });
 
     return true;
   } catch (error) {

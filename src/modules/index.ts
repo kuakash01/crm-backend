@@ -11,6 +11,8 @@ import servicesRoutes from "./services/services.routes";
 import dealsRoutes from "./deals/deals.routes";
 import dashboardRoutes from "./dashboard/dashboard.routes";
 import notificationsRoutes from "./notifications/notification.routes";
+import organizationsRoutes from "./organizations/organizations.routes";
+import searchRoutes from "./search/search.routes";
 
 import type { Request, Response } from "express";
 
@@ -30,6 +32,8 @@ router.use("/services", servicesRoutes);
 router.use("/deals", dealsRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/notifications", notificationsRoutes);
+router.use("/organizations", organizationsRoutes);
+router.use("/search", searchRoutes);
 
 router.get("/health", (req: Request, res: Response) => {
     res.json({ message: "OK" });

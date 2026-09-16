@@ -14,6 +14,7 @@ import {
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
 import { createNotifications } from "../notifications/notification.helper";
+import { emitDashboardUpdate } from "../../config/socket";
 
 
 export const getCustomers = async (
@@ -226,6 +227,12 @@ export const createCustomer = async (
 
   await createActivities([activity], db);
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "CUSTOMER",
+    entityId: customer.id,
+    action: "CREATED",
+  });
+
   return customer;
 
 };
@@ -328,6 +335,12 @@ export const updateCustomer = async (
 
   await createActivities(activities);
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "CUSTOMER",
+    entityId: customerId,
+    action: "UPDATED",
+  });
+
   return result.rows[0];
 
 };
@@ -422,6 +435,12 @@ export const updateCustomerStatus = async (
     },
   ]);
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "CUSTOMER",
+    entityId: customerId,
+    action: status,
+  });
+
   return result.rows[0];
 };
 
@@ -464,6 +483,12 @@ export const deleteCustomer = async (
     );
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "CUSTOMER",
+      entityId: customerId,
+      action: "DELETED",
+    });
 
     return result.rows[0];
 
@@ -634,6 +659,11 @@ export const assignCustomer = async (
     }
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "CUSTOMER",
+      action: "ASSIGNED",
+    });
 
     return {
       assignedTo,

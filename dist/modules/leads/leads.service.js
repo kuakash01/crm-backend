@@ -13,6 +13,7 @@ const sql_helper_1 = require("../../shared/helpers/sql.helper");
 const leads_helper_2 = require("./leads.helper");
 const entity_relations_service_1 = require("../../shared/services/entity-relations.service");
 const notification_helper_1 = require("../notifications/notification.helper");
+const socket_1 = require("../../config/socket");
 const getLeads = async (organizationId, currentUserId, filters, canViewUnassigned = false) => {
     try {
         const { conditions, params, } = (0, leads_helper_1.buildLeadFilters)(filters);
@@ -117,6 +118,11 @@ const createLead = async (organizationId, userId, lead) => {
             createdBy: userId,
         };
         await (0, activites_service_1.createActivities)([activity]);
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "LEAD",
+            entityId: result.rows[0].id,
+            action: "CREATED",
+        });
         // Returning the single created object instead of the whole rows array is usually cleaner
         return result.rows[0];
     }
@@ -201,6 +207,11 @@ const updateLeadDetails = async (leadId, userId, organizationId, currentUserRole
             createdBy: userId,
         },
     ]);
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "LEAD",
+        entityId: leadId,
+        action: "UPDATED",
+    });
     return result.rows[0];
 };
 exports.updateLeadDetails = updateLeadDetails;
@@ -300,6 +311,10 @@ const assignLeads = async (currentUserId, currentUserName, leadIds, assignedTo) 
             }
         }
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "LEAD",
+            action: "ASSIGNED",
+        });
         return {
             assignedTo,
             totalAssigned: leadIds.length,
@@ -432,6 +447,11 @@ const updateLeadStatus = async (leadId, userId, organizationId, status, userName
         };
         await (0, activites_service_1.createActivities)([activity], client);
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "LEAD",
+            entityId: leadId,
+            action: updatedLead.status,
+        });
         return updatedLead;
     }
     catch (error) {
@@ -464,6 +484,11 @@ const deleteLead = async (leadId, organizationId) => {
             throw new AppError_1.AppError("Lead not found", 404);
         }
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "LEAD",
+            entityId: leadId,
+            action: "DELETED",
+        });
         return true;
     }
     catch (error) {

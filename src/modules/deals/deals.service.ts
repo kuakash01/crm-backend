@@ -9,6 +9,7 @@ import { shiftSqlParams } from "../../shared/helpers/sql.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { deleteEntityRelations } from "../../shared/services/entity-relations.service";
 import { createNotifications } from "../notifications/notification.helper";
+import { emitDashboardUpdate } from "../../config/socket";
 
 
 
@@ -125,6 +126,12 @@ export const createDeal = async (
     }
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "DEAL",
+      entityId: result.rows[0].id,
+      action: "CREATED",
+    });
 
     return result.rows[0];
 
@@ -589,6 +596,12 @@ export const updateDeal = async (
 
     await client.query("COMMIT");
 
+    emitDashboardUpdate(organizationId, {
+      entityType: "DEAL",
+      entityId: dealId,
+      action: "UPDATED",
+    });
+
     // Return the same DTO as GET /deals/:id
     return await getDealById(
       dealId,
@@ -743,6 +756,12 @@ export const updateDealStage = async (
 
     await client.query("COMMIT");
 
+    emitDashboardUpdate(organizationId, {
+      entityType: "DEAL",
+      entityId: dealId,
+      action: stage,
+    });
+
     return result.rows[0];
   } catch (error) {
     await client.query("ROLLBACK");
@@ -794,6 +813,12 @@ export const deleteDeal = async (
     );
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "DEAL",
+      entityId: dealId,
+      action: "DELETED",
+    });
 
     return result.rows[0];
 
@@ -944,6 +969,11 @@ export const assignDeals = async (
     }
 
     await client.query("COMMIT");
+
+    emitDashboardUpdate(organizationId, {
+      entityType: "DEAL",
+      action: "ASSIGNED",
+    });
 
     return {
       updatedCount: dealIds.length,

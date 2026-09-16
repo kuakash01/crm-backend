@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyTokenSocket = exports.getIO = exports.initializeSocket = void 0;
+exports.verifyTokenSocket = exports.emitDashboardUpdate = exports.emitToOrganization = exports.getIO = exports.initializeSocket = void 0;
 const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const env_1 = require("./env");
@@ -18,8 +18,14 @@ const initializeSocket = (httpServer) => {
     });
     io.use(async (socket, next) => {
         try {
+            // In production (Vercel + Render), the frontend fetches a token via
+            // the Next.js proxy and passes it here as socket.auth.token to avoid
+            // cross-domain HttpOnly cookie scoping issues.
+            // In local dev, the cookie path is used as fallback.
+            const authToken = socket.handshake.auth?.token;
             const cookieHeader = socket.handshake.headers.cookie;
-            const token = getAccessTokenFromCookie(cookieHeader);
+            const cookieToken = getAccessTokenFromCookie(cookieHeader);
+            const token = authToken || cookieToken;
             if (!token) {
                 return next(new Error("Unauthorized"));
             }
@@ -39,6 +45,10 @@ const initializeSocket = (httpServer) => {
         console.log(`User ${user.id} connected: ${socket.id}`);
         socket.join(`user:${user.id}`);
         console.log(`User ${user.id} joined room user:${user.id}`);
+        if (user.organization_id) {
+            socket.join(`org:${user.organization_id}`);
+            console.log(`User ${user.id} joined room org:${user.organization_id}`);
+        }
         socket.on("disconnect", () => {
             console.log(`User ${user.id} disconnected: ${socket.id}`);
         });
@@ -53,6 +63,32 @@ const getIO = () => {
     return io;
 };
 exports.getIO = getIO;
+const emitToOrganization = (organizationId, event, data) => {
+    try {
+        if (!io || !organizationId)
+            return;
+        io.to(`org:${organizationId}`).emit(event, data);
+    }
+    catch (err) {
+        console.error(`Failed to emit ${event} to org:${organizationId}:`, err);
+    }
+};
+exports.emitToOrganization = emitToOrganization;
+const emitDashboardUpdate = (organizationId, payload = {}) => {
+    try {
+        if (!io || !organizationId)
+            return;
+        const eventPayload = {
+            ...payload,
+            timestamp: payload.timestamp || new Date().toISOString(),
+        };
+        io.to(`org:${organizationId}`).emit("dashboard:update", eventPayload);
+    }
+    catch (err) {
+        console.error(`Failed to emit dashboard:update to org:${organizationId}:`, err);
+    }
+};
+exports.emitDashboardUpdate = emitDashboardUpdate;
 const getAccessTokenFromCookie = (cookieHeader) => {
     if (!cookieHeader) {
         return null;

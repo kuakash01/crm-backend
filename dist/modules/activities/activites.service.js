@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getActivities = exports.createActivities = void 0;
 const db_1 = require("../../config/db");
 const pagination_helper_1 = require("../../shared/helpers/pagination.helper");
+const socket_1 = require("../../config/socket");
 const createActivities = async (activities, db = db_1.pool) => {
     if (!activities.length) {
         return [];
@@ -27,7 +28,18 @@ const createActivities = async (activities, db = db_1.pool) => {
       ${placeholders.join(",")}
     RETURNING *
     `, values);
-    return result.rows;
+    const rows = result.rows;
+    // Broadcast dashboard update for the activities
+    const orgIds = new Set(activities.map((a) => a.organizationId));
+    for (const orgId of orgIds) {
+        const firstAct = activities.find((a) => a.organizationId === orgId);
+        (0, socket_1.emitDashboardUpdate)(orgId, {
+            entityType: firstAct?.entityType || "ACTIVITY",
+            entityId: firstAct?.entityId,
+            action: firstAct?.activityType || "ACTIVITY_LOGGED",
+        });
+    }
+    return rows;
 };
 exports.createActivities = createActivities;
 const getActivities = async (organizationId, entityType, entityId, options) => {

@@ -8,6 +8,7 @@ import {
 } from "../../shared/helpers/pagination.helper";
 import { ActivityInput } from "../activities/activities.types";
 import { createNotifications } from "../notifications/notification.helper";
+import { emitDashboardUpdate } from "../../config/socket";
 
 export interface GetAllTasksParams {
   organizationId: number;
@@ -424,6 +425,12 @@ export const createTask = async (
     });
   }
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "TASK",
+    entityId: task.id,
+    action: "CREATED",
+  });
+
   return task;
 };
 
@@ -593,6 +600,12 @@ export const updateTask = async (
     });
   }
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "TASK",
+    entityId: task.id,
+    action: "UPDATED",
+  });
+
   return task;
 };
 
@@ -682,6 +695,12 @@ export const updateTaskStatus = async (
     }
   }
 
+  emitDashboardUpdate(organizationId, {
+    entityType: "TASK",
+    entityId: updatedTask.id,
+    action: updatedTask.status,
+  });
+
   return updatedTask;
 };
 
@@ -707,6 +726,12 @@ export const deleteTask = async (
   if (!result.rows.length) {
     throw new AppError("Task not found", 404);
   }
+
+  emitDashboardUpdate(organizationId, {
+    entityType: "TASK",
+    entityId: taskId,
+    action: "DELETED",
+  });
 
   return result.rows[0];
 };

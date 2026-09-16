@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePassword = exports.resetPassword = exports.forgotPassword = exports.acceptInvitation = exports.getInvitationDetails = exports.getCurrentUser = exports.logout = exports.login = exports.register = exports.verifyEmail = void 0;
+exports.getSocketToken = exports.changePassword = exports.resetPassword = exports.forgotPassword = exports.acceptInvitation = exports.getInvitationDetails = exports.getCurrentUser = exports.logout = exports.login = exports.register = exports.verifyEmail = void 0;
 const authService = __importStar(require("./auth.service"));
 const env_1 = require("../../config/env");
 const AppError_1 = require("../../shared/errors/AppError");
@@ -228,6 +228,28 @@ const changePassword = async (req, res, next) => {
     }
 };
 exports.changePassword = changePassword;
+const getSocketToken = async (req, res) => {
+    try {
+        const token = req.cookies?.accessToken;
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            token,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to get socket token",
+        });
+    }
+};
+exports.getSocketToken = getSocketToken;
 // export const verifyLoginOtp = async (
 //   req: Request,
 //   res: Response,

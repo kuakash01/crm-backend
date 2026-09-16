@@ -7,6 +7,7 @@ const AppError_1 = require("../../shared/errors/AppError");
 const users_service_1 = require("../users/users.service");
 const pagination_helper_1 = require("../../shared/helpers/pagination.helper");
 const notification_helper_1 = require("../notifications/notification.helper");
+const socket_1 = require("../../config/socket");
 const getAllTasksService = async ({ organizationId, currentUserId, page, limit, search = "", status, entityType, entityId, priority, }) => {
     const { page: currentPage, limit: currentLimit, offset, } = (0, pagination_helper_1.buildPagination)({
         page,
@@ -294,6 +295,11 @@ const createTask = async (organizationId, currentUserId, data) => {
             entityId: entity_id ?? null,
         });
     }
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "TASK",
+        entityId: task.id,
+        action: "CREATED",
+    });
     return task;
 };
 exports.createTask = createTask;
@@ -420,6 +426,11 @@ const updateTask = async (organizationId, currentUserId, taskId, data) => {
             entityId: oldTask.entity_id ?? null,
         });
     }
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "TASK",
+        entityId: task.id,
+        action: "UPDATED",
+    });
     return task;
 };
 exports.updateTask = updateTask;
@@ -486,6 +497,11 @@ const updateTaskStatus = async (organizationId, taskId, status, currentUserId) =
             });
         }
     }
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "TASK",
+        entityId: updatedTask.id,
+        action: updatedTask.status,
+    });
     return updatedTask;
 };
 exports.updateTaskStatus = updateTaskStatus;
@@ -504,6 +520,11 @@ const deleteTask = async (organizationId, taskId) => {
     if (!result.rows.length) {
         throw new AppError_1.AppError("Task not found", 404);
     }
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "TASK",
+        entityId: taskId,
+        action: "DELETED",
+    });
     return result.rows[0];
 };
 exports.deleteTask = deleteTask;

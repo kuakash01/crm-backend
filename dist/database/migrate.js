@@ -9,11 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const pg_1 = require("pg");
 dotenv_1.default.config();
 const pool = new pg_1.Pool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
+    connectionString: process.env.DATABASE_URL,
 });
 const migrationsDir = path_1.default.join(process.cwd(), "migrations");
 async function migrate() {

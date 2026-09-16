@@ -16,6 +16,8 @@ const services_routes_1 = __importDefault(require("./services/services.routes"))
 const deals_routes_1 = __importDefault(require("./deals/deals.routes"));
 const dashboard_routes_1 = __importDefault(require("./dashboard/dashboard.routes"));
 const notification_routes_1 = __importDefault(require("./notifications/notification.routes"));
+const organizations_routes_1 = __importDefault(require("./organizations/organizations.routes"));
+const search_routes_1 = __importDefault(require("./search/search.routes"));
 const router = express_1.default.Router();
 // Register module routes
 router.use("/auth", auth_routes_1.default);
@@ -30,4 +32,9 @@ router.use("/services", services_routes_1.default);
 router.use("/deals", deals_routes_1.default);
 router.use("/dashboard", dashboard_routes_1.default);
 router.use("/notifications", notification_routes_1.default);
+router.use("/organizations", organizations_routes_1.default);
+router.use("/search", search_routes_1.default);
+router.get("/health", (req, res) => {
+    res.json({ message: "OK" });
+});
 exports.default = router;

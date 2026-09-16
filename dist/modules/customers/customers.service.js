@@ -11,6 +11,7 @@ const sql_helper_1 = require("../../shared/helpers/sql.helper");
 const customers_helper_1 = require("./customers.helper");
 const entity_relations_service_1 = require("../../shared/services/entity-relations.service");
 const notification_helper_1 = require("../notifications/notification.helper");
+const socket_1 = require("../../config/socket");
 const getCustomers = async (organizationId, currentUserId, filters) => {
     try {
         const { conditions, params, } = (0, customers_helper_1.buildCustomerFilters)(filters);
@@ -128,6 +129,11 @@ const createCustomer = async (organizationId, currentUserId, data, db = db_1.poo
         createdBy: currentUserId
     };
     await (0, activites_service_1.createActivities)([activity], db);
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "CUSTOMER",
+        entityId: customer.id,
+        action: "CREATED",
+    });
     return customer;
 };
 exports.createCustomer = createCustomer;
@@ -192,6 +198,11 @@ const updateCustomer = async (organizationId, customerId, currentUserId, data) =
         },
     ];
     await (0, activites_service_1.createActivities)(activities);
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "CUSTOMER",
+        entityId: customerId,
+        action: "UPDATED",
+    });
     return result.rows[0];
 };
 exports.updateCustomer = updateCustomer;
@@ -258,6 +269,11 @@ const updateCustomerStatus = async (organizationId, customerId, status, currentU
             createdBy: currentUserId,
         },
     ]);
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType: "CUSTOMER",
+        entityId: customerId,
+        action: status,
+    });
     return result.rows[0];
 };
 exports.updateCustomerStatus = updateCustomerStatus;
@@ -281,6 +297,11 @@ const deleteCustomer = async (organizationId, customerId) => {
         }
         await (0, entity_relations_service_1.deleteEntityRelations)(organizationId, "CUSTOMER", customerId, client);
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "CUSTOMER",
+            entityId: customerId,
+            action: "DELETED",
+        });
         return result.rows[0];
     }
     catch (error) {
@@ -388,6 +409,10 @@ const assignCustomer = async (currentUserId, customerIds, assignedTo) => {
             }
         }
         await client.query("COMMIT");
+        (0, socket_1.emitDashboardUpdate)(organizationId, {
+            entityType: "CUSTOMER",
+            action: "ASSIGNED",
+        });
         return {
             assignedTo,
             totalAssigned: customerIds.length,

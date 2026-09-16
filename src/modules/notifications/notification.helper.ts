@@ -4,7 +4,7 @@ import {
   NotificationAction,
 } from "./notification.types";
 
-import { getIO } from "../../config/socket";
+import { getIO, emitDashboardUpdate } from "../../config/socket";
 
 interface CreateNotificationParams {
   organizationId: number;
@@ -87,6 +87,13 @@ export const createNotifications = async ({
       notification
     );
   }
+
+  emitDashboardUpdate(organizationId, {
+    entityType,
+    entityId,
+    action,
+    type,
+  });
 
   return notifications;
 };

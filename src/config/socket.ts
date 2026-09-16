@@ -68,6 +68,13 @@ export const initializeSocket = (
       `User ${user.id} joined room user:${user.id}`
     );
 
+    if (user.organization_id) {
+      socket.join(`org:${user.organization_id}`);
+      console.log(
+        `User ${user.id} joined room org:${user.organization_id}`
+      );
+    }
+
     socket.on("disconnect", () => {
       console.log(
         `User ${user.id} disconnected: ${socket.id}`
@@ -86,6 +93,44 @@ export const getIO = () => {
   }
 
   return io;
+};
+
+export const emitToOrganization = (
+  organizationId: number,
+  event: string,
+  data: any
+) => {
+  try {
+    if (!io || !organizationId) return;
+    io.to(`org:${organizationId}`).emit(event, data);
+  } catch (err) {
+    console.error(`Failed to emit ${event} to org:${organizationId}:`, err);
+  }
+};
+
+export interface DashboardUpdateEvent {
+  entityType?: "LEAD" | "DEAL" | "CUSTOMER" | "TASK" | "ACTIVITY" | string | null;
+  entityId?: number | null;
+  action?: string | null;
+  type?: string | null;
+  timestamp?: string;
+  message?: string | null;
+}
+
+export const emitDashboardUpdate = (
+  organizationId: number,
+  payload: DashboardUpdateEvent = {}
+) => {
+  try {
+    if (!io || !organizationId) return;
+    const eventPayload = {
+      ...payload,
+      timestamp: payload.timestamp || new Date().toISOString(),
+    };
+    io.to(`org:${organizationId}`).emit("dashboard:update", eventPayload);
+  } catch (err) {
+    console.error(`Failed to emit dashboard:update to org:${organizationId}:`, err);
+  }
 };
 
 const getAccessTokenFromCookie = (

@@ -10,6 +10,7 @@ const notification_helper_1 = require("../notifications/notification.helper");
 const crypto_1 = __importDefault(require("crypto"));
 const env_1 = require("../../config/env");
 const emailTemplates_1 = require("../../shared/helpers/emailTemplates");
+const demo_helper_1 = require("../../shared/helpers/demo.helper");
 const getUsers = async (organizationId) => {
     const result = await db_1.pool.query(`
       SELECT
@@ -209,6 +210,10 @@ const createUser = async (data, organizationId) => {
 };
 exports.createUser = createUser;
 const updateUser = async (id, organizationId, data) => {
+    const targetUser = await db_1.pool.query(`SELECT email FROM users WHERE id = $1 AND organization_id = $2`, [id, organizationId]);
+    if (targetUser.rows.length && (0, demo_helper_1.isDemoAccount)(targetUser.rows[0].email)) {
+        throw new AppError_1.AppError("Action disabled: Demo account is protected and cannot be modified.", 403);
+    }
     await db_1.pool.query(`
     UPDATE users
     SET
@@ -248,6 +253,9 @@ const changeRole = async (id, roleId, organizationId, currentUserId) => {
     ]);
     if (!userResult.rows.length) {
         throw new AppError_1.AppError("User not found", 404);
+    }
+    if ((0, demo_helper_1.isDemoAccount)(userResult.rows[0].email)) {
+        throw new AppError_1.AppError("Action disabled: Role of demo account cannot be changed.", 403);
     }
     const oldRole = userResult.rows[0].role_name;
     // Get new role name
@@ -311,6 +319,9 @@ const changeStatus = async (id, isActive, organizationId, currentUserId) => {
     if (!userResult.rows.length) {
         throw new AppError_1.AppError("User not found", 404);
     }
+    if ((0, demo_helper_1.isDemoAccount)(userResult.rows[0].email)) {
+        throw new AppError_1.AppError("Action disabled: Demo account status cannot be changed.", 403);
+    }
     const user = userResult.rows[0];
     if (user.is_active === isActive) {
         throw new AppError_1.AppError(`User is already ${isActive ? "active" : "inactive"}`, 400);
@@ -343,6 +354,10 @@ const changeStatus = async (id, isActive, organizationId, currentUserId) => {
 };
 exports.changeStatus = changeStatus;
 const deleteUser = async (id, organizationId) => {
+    const targetUser = await db_1.pool.query(`SELECT email FROM users WHERE id = $1 AND organization_id = $2`, [id, organizationId]);
+    if (targetUser.rows.length && (0, demo_helper_1.isDemoAccount)(targetUser.rows[0].email)) {
+        throw new AppError_1.AppError("Action disabled: Demo accounts cannot be deleted.", 403);
+    }
     await db_1.pool.query(`
     DELETE FROM users
     WHERE
@@ -641,10 +656,15 @@ const getMyProfile = async (userId) => {
         reportsToName: user.reports_to_name,
         createdAt: user.created_at,
         updatedAt: user.updated_at,
+        isDemo: (0, demo_helper_1.isDemoAccount)(user.email),
     };
 };
 exports.getMyProfile = getMyProfile;
 const updateMyProfile = async (userId, data) => {
+    const userCheck = await db_1.pool.query(`SELECT email FROM users WHERE id = $1`, [userId]);
+    if (userCheck.rows.length && (0, demo_helper_1.isDemoAccount)(userCheck.rows[0].email)) {
+        throw new AppError_1.AppError("Action disabled: Demo account profile is locked to preserve portfolio presentation.", 403);
+    }
     const result = await db_1.pool.query(`
     UPDATE users
     SET

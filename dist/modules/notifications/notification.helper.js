@@ -54,6 +54,12 @@ const createNotifications = async ({ organizationId, userIds, type, action, titl
     for (const notification of notifications) {
         io.to(`user:${notification.user_id}`).emit("notification:new", notification);
     }
+    (0, socket_1.emitDashboardUpdate)(organizationId, {
+        entityType,
+        entityId,
+        action,
+        type,
+    });
     return notifications;
 };
 exports.createNotifications = createNotifications;
