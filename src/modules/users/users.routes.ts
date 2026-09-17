@@ -70,7 +70,22 @@ router.patch(
 router.patch(
   "/:id/status",
   verifyToken,
-  authorize("users", "deactivate"),
+  (req, res, next) => {
+    const isActivating = Boolean(req.body?.isActive);
+    const requiredAction = isActivating ? "activate" : "deactivate";
+    const userPerms: string[] = req.user?.permissions || [];
+
+    if (
+      !userPerms.includes(`users:${requiredAction}`) &&
+      !userPerms.includes("users:update")
+    ) {
+      return res.status(403).json({
+        message: "Permission denied",
+      });
+    }
+
+    next();
+  },
   userController.changeStatus
 );
 

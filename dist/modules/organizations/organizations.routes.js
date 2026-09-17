@@ -40,4 +40,5 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.verifyToken);
 router.get("/me", (0, auth_middleware_1.authorize)("organizations", "read"), organizationController.getMyOrganization);
 router.patch("/me", (0, auth_middleware_1.authorize)("organizations", "update"), organizationController.updateMyOrganization);
+router.post("/regenerate-inbound-key", (0, auth_middleware_1.authorize)("organizations", "update"), organizationController.regenerateInboundKey);
 exports.default = router;

@@ -31,7 +31,10 @@ const getUsers = async (organizationId) => {
 
       ORDER BY u.id DESC
       `, [organizationId]);
-    return result.rows;
+    return result.rows.map((u) => ({
+        ...u,
+        is_demo: (0, demo_helper_1.isDemoAccount)(u.email),
+    }));
 };
 exports.getUsers = getUsers;
 const getUser = async (id, organizationId) => {
@@ -240,6 +243,7 @@ const changeRole = async (id, roleId, organizationId, currentUserId) => {
     const userResult = await db_1.pool.query(`
     SELECT
       u.role_id,
+      u.email,
       r.name AS role_name
     FROM users u
     LEFT JOIN roles r
@@ -307,7 +311,8 @@ const changeStatus = async (id, isActive, organizationId, currentUserId) => {
     const userResult = await db_1.pool.query(`
     SELECT
       is_active,
-      fullname
+      fullname,
+      email
     FROM users
     WHERE
       id = $1
@@ -318,6 +323,9 @@ const changeStatus = async (id, isActive, organizationId, currentUserId) => {
     ]);
     if (!userResult.rows.length) {
         throw new AppError_1.AppError("User not found", 404);
+    }
+    if (id === currentUserId && !isActive) {
+        throw new AppError_1.AppError("You cannot deactivate your own account.", 400);
     }
     if ((0, demo_helper_1.isDemoAccount)(userResult.rows[0].email)) {
         throw new AppError_1.AppError("Action disabled: Demo account status cannot be changed.", 403);

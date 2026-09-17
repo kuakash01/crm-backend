@@ -2,6 +2,10 @@ import express from "express";
 const router = express.Router();
 import * as leadsController from "./leads.controller";
 import { verifyToken, authorize } from "../../middleware/auth.middleware";
+import { publicLeadLimiter } from "../../middleware/rateLimiter.middleware";
+
+// Public inbound lead capture (Rate limited + honeypot protected)
+router.post("/public", publicLeadLimiter, leadsController.capturePublicLead);
 
 router.use(verifyToken);
 

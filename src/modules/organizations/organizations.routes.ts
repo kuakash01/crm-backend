@@ -18,4 +18,10 @@ router.patch(
   organizationController.updateMyOrganization
 );
 
+router.post(
+  "/regenerate-inbound-key",
+  authorize("organizations", "update"),
+  organizationController.regenerateInboundKey
+);
+
 export default router;

@@ -51,3 +51,22 @@ export const updateMyOrganization = async (
     next(error);
   }
 };
+
+export const regenerateInboundKey = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await organizationService.regenerateInboundKey(
+      req.user.organization_id
+    );
+    res.status(200).json({
+      status: "success",
+      message: "Inbound API key regenerated successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

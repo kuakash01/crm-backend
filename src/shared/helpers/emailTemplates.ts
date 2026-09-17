@@ -725,3 +725,51 @@ export const sendPasswordResetEmail = async (
     `,
   });
 };
+
+export async function sendLoginOtpEmail(to: string, otp: string) {
+  await sendEmail({
+    to,
+    subject: "Your CRM Login Code | One-Time Passcode",
+    html: `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Your Login Code</title>
+        </head>
+        <body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f5;padding:40px 16px;">
+            <tr>
+              <td align="center">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;">
+                  <tr>
+                    <td style="padding:28px 32px;background:linear-gradient(135deg, #18181b 0%, #27272a 100%);text-align:center;">
+                      <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">CRM Pro Platform</h1>
+                      <p style="margin:4px 0 0;font-size:12px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;">Secure Sign-in Code</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:36px 32px;">
+                      <h2 style="margin:0 0 12px;font-size:18px;font-weight:600;color:#18181b;">Sign in to your CRM workspace</h2>
+                      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#52525b;">Use the verification code below to log into your account. This single-use code will expire in 10 minutes.</p>
+                      <div style="background-color:#f4f4f5;border:1px solid #e4e4e7;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+                        <span style="font-family:'Courier New',Courier,monospace;font-size:36px;font-weight:700;letter-spacing:10px;color:#18181b;">${otp}</span>
+                      </div>
+                      <p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;">If you did not request this code, please ignore this email or contact your administrator immediately.</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:20px 32px;background-color:#fafafa;border-top:1px solid #e4e4e7;text-align:center;">
+                      <p style="margin:0;font-size:12px;color:#a1a1aa;">© ${new Date().getFullYear()} CRM Platform. All rights reserved.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `,
+  });
+}

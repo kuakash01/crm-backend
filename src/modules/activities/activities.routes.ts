@@ -1,10 +1,11 @@
 import express from "express";
-import { getActivities } from "./activities.controller";
-import { verifyToken } from "../../middleware/auth.middleware"
+import { getActivities, createActivity } from "./activities.controller";
+import { verifyToken } from "../../middleware/auth.middleware";
 const router = express.Router();
 
 router.use(verifyToken);
 
-router.get("/:entityType/:entityId", getActivities)
+router.get("/:entityType/:entityId", getActivities);
+router.post("/:entityType/:entityId", createActivity);
 
 export default router;

@@ -49,7 +49,18 @@ router.post("/invitations/:id/resend", auth_middleware_1.verifyToken, userContro
 router.get("/:id", auth_middleware_1.verifyToken, (0, auth_middleware_1.authorize)("users", "read"), userController.getUser);
 router.patch("/me", auth_middleware_1.verifyToken, userController.updateMyProfile);
 router.patch("/:id", auth_middleware_1.verifyToken, (0, auth_middleware_1.authorize)("users", "update"), userController.updateUser);
-router.patch("/:id/status", auth_middleware_1.verifyToken, (0, auth_middleware_1.authorize)("users", "deactivate"), userController.changeStatus);
+router.patch("/:id/status", auth_middleware_1.verifyToken, (req, res, next) => {
+    const isActivating = Boolean(req.body?.isActive);
+    const requiredAction = isActivating ? "activate" : "deactivate";
+    const userPerms = req.user?.permissions || [];
+    if (!userPerms.includes(`users:${requiredAction}`) &&
+        !userPerms.includes("users:update")) {
+        return res.status(403).json({
+            message: "Permission denied",
+        });
+    }
+    next();
+}, userController.changeStatus);
 router.patch("/:id/role", auth_middleware_1.verifyToken, (0, auth_middleware_1.authorize)("users", "update"), userController.changeRole);
 router.delete("/invitations/:id", auth_middleware_1.verifyToken, userController.cancelInvitation);
 router.delete("/:id", auth_middleware_1.verifyToken, (0, auth_middleware_1.authorize)("users", "delete"), userController.deleteUser);

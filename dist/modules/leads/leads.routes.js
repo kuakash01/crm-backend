@@ -40,6 +40,9 @@ const express_1 = __importDefault(require("express"));
 const router = express_1.default.Router();
 const leadsController = __importStar(require("./leads.controller"));
 const auth_middleware_1 = require("../../middleware/auth.middleware");
+const rateLimiter_middleware_1 = require("../../middleware/rateLimiter.middleware");
+// Public inbound lead capture (Rate limited + honeypot protected)
+router.post("/public", rateLimiter_middleware_1.publicLeadLimiter, leadsController.capturePublicLead);
 router.use(auth_middleware_1.verifyToken);
 router.get('/', (0, auth_middleware_1.authorize)("leads", "read"), leadsController.getLeads);
 router.get("/options", (0, auth_middleware_1.authorize)("leads", "read"), leadsController.getLeadOptions);

@@ -1,8 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateOrganization = exports.getOrganization = void 0;
+exports.regenerateInboundKey = exports.updateOrganization = exports.getOrganization = void 0;
 const db_1 = require("../../config/db");
 const AppError_1 = require("../../shared/errors/AppError");
+const crypto_1 = __importDefault(require("crypto"));
 const mapOrganization = (row) => ({
     id: row.id,
     name: row.name,
@@ -17,6 +21,7 @@ const mapOrganization = (row) => ({
     industry: row.industry ?? "",
     description: row.description ?? "",
     logo: row.logo ?? null,
+    inboundLeadKey: row.inbound_lead_key ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
 });
@@ -36,6 +41,7 @@ const getOrganization = async (organizationId) => {
       industry,
       description,
       logo,
+      inbound_lead_key,
       created_at,
       updated_at
     FROM organizations
@@ -103,6 +109,7 @@ const updateOrganization = async (organizationId, data) => {
       industry,
       description,
       logo,
+      inbound_lead_key,
       created_at,
       updated_at
     `, [
@@ -132,3 +139,15 @@ const updateOrganization = async (organizationId, data) => {
     };
 };
 exports.updateOrganization = updateOrganization;
+const regenerateInboundKey = async (organizationId) => {
+    const newKey = `crm_pub_${crypto_1.default.randomBytes(18).toString("hex")}`;
+    const result = await db_1.pool.query(`UPDATE organizations
+     SET inbound_lead_key = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING inbound_lead_key`, [newKey, organizationId]);
+    if (!result.rows.length) {
+        throw new AppError_1.AppError("Organization not found", 404);
+    }
+    return { inboundLeadKey: result.rows[0].inbound_lead_key };
+};
+exports.regenerateInboundKey = regenerateInboundKey;

@@ -33,9 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getLeadOptions = exports.updateLeadStatus = exports.assignLeads = exports.deleteLead = exports.updateLeadDetails = exports.getLeadById = exports.createLead = exports.getLeads = void 0;
+exports.getLeadOptions = exports.updateLeadStatus = exports.assignLeads = exports.deleteLead = exports.updateLeadDetails = exports.getLeadById = exports.capturePublicLead = exports.createLead = exports.getLeads = void 0;
 const leadsService = __importStar(require("./leads.service"));
 const auth_helper_1 = require("../auth/auth.helper");
+const inboundLead_schema_1 = require("./inboundLead.schema");
 const getLeads = async (req, res, next) => {
     try {
         const leads = await leadsService.getLeads(req.user.organization_id, req.user.id, {
@@ -69,6 +70,29 @@ const createLead = async (req, res, next) => {
     }
 };
 exports.createLead = createLead;
+const capturePublicLead = async (req, res, next) => {
+    try {
+        const headerKey = req.headers["x-inbound-key"];
+        const bodyData = {
+            ...req.body,
+            fname: req.body.fname || req.body.firstName,
+            lname: req.body.lname || req.body.lastName,
+            phone1: req.body.phone1 || req.body.phone,
+            key: req.body.key || headerKey || undefined,
+        };
+        const validatedData = inboundLead_schema_1.inboundLeadSchema.parse(bodyData);
+        const result = await leadsService.createInboundLead(validatedData);
+        res.status(201).json({
+            success: true,
+            message: "Inquiry received successfully. Our team will get in touch shortly.",
+            data: result,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.capturePublicLead = capturePublicLead;
 const getLeadById = async (req, res, next) => {
     try {
         const lead = await leadsService.getLeadById(Number(req.params.id), req.user.organization_id);

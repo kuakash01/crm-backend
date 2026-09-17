@@ -42,7 +42,10 @@ export const getUsers = async (
       [organizationId]
     );
 
-  return result.rows;
+  return result.rows.map((u) => ({
+    ...u,
+    is_demo: isDemoAccount(u.email),
+  }));
 };
 
 export const getUser = async (
@@ -339,6 +342,7 @@ export const changeRole = async (
     `
     SELECT
       u.role_id,
+      u.email,
       r.name AS role_name
     FROM users u
     LEFT JOIN roles r
@@ -441,7 +445,8 @@ export const changeStatus = async (
     `
     SELECT
       is_active,
-      fullname
+      fullname,
+      email
     FROM users
     WHERE
       id = $1
@@ -457,6 +462,13 @@ export const changeStatus = async (
     throw new AppError(
       "User not found",
       404
+    );
+  }
+
+  if (id === currentUserId && !isActive) {
+    throw new AppError(
+      "You cannot deactivate your own account.",
+      400
     );
   }
 

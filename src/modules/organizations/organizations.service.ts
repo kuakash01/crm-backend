@@ -1,6 +1,7 @@
 import { pool } from "../../config/db";
 import { AppError } from "../../shared/errors/AppError";
 import { UpdateOrganizationInput } from "./organizations.schema";
+import crypto from "crypto";
 
 const mapOrganization = (row: Record<string, unknown>) => ({
   id: row.id,
@@ -16,6 +17,7 @@ const mapOrganization = (row: Record<string, unknown>) => ({
   industry: row.industry ?? "",
   description: row.description ?? "",
   logo: row.logo ?? null,
+  inboundLeadKey: row.inbound_lead_key ?? "",
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -37,6 +39,7 @@ export const getOrganization = async (organizationId: number) => {
       industry,
       description,
       logo,
+      inbound_lead_key,
       created_at,
       updated_at
     FROM organizations
@@ -118,6 +121,7 @@ export const updateOrganization = async (
       industry,
       description,
       logo,
+      inbound_lead_key,
       created_at,
       updated_at
     `,
@@ -152,4 +156,19 @@ export const updateOrganization = async (
     ...mapOrganization(result.rows[0]),
     teamMembers: statsResult.rows[0]?.team_members ?? 0,
   };
+};
+
+export const regenerateInboundKey = async (organizationId: number) => {
+  const newKey = `crm_pub_${crypto.randomBytes(18).toString("hex")}`;
+  const result = await pool.query(
+    `UPDATE organizations
+     SET inbound_lead_key = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING inbound_lead_key`,
+    [newKey, organizationId]
+  );
+  if (!result.rows.length) {
+    throw new AppError("Organization not found", 404);
+  }
+  return { inboundLeadKey: result.rows[0].inbound_lead_key };
 };

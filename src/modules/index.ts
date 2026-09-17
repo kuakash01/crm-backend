@@ -13,6 +13,7 @@ import dashboardRoutes from "./dashboard/dashboard.routes";
 import notificationsRoutes from "./notifications/notification.routes";
 import organizationsRoutes from "./organizations/organizations.routes";
 import searchRoutes from "./search/search.routes";
+import contactRoutes from "./contact/contact.routes";
 
 import type { Request, Response } from "express";
 
@@ -34,6 +35,7 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/notifications", notificationsRoutes);
 router.use("/organizations", organizationsRoutes);
 router.use("/search", searchRoutes);
+router.use("/contact", contactRoutes);
 
 router.get("/health", (req: Request, res: Response) => {
     res.json({ message: "OK" });

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import * as authService from "./auth.service";
-import { COOKIE_SAME_SITE, COOKIE_SECURE, COOKIE_EXPIRES_DAYS } from "../../config/env";
+import { COOKIE_SAME_SITE, COOKIE_SECURE, COOKIE_EXPIRES_DAYS, GOOGLE_CLIENT_ID, GOOGLE_CALLBACK_URL, CORS_ORIGIN } from "../../config/env";
 import { AppError } from "../../shared/errors/AppError";
 
 export const verifyEmail = async (
@@ -342,44 +342,140 @@ export const getSocketToken = async (
   }
 };
 
-// export const verifyLoginOtp = async (
-//   req: Request,
-//   res: Response,
-//   next: NextFunction,
-// ) => {
-//   try {
-//     const { userId, otp } = req.body;
+export const sendLoginOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { email } = req.body;
+    const result = await authService.sendLoginOtp(email);
+    return res.status(200).json({
+      status: "success",
+      message: result.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-//     const result =
-//       await authService.verifyLoginOtp(
-//         userId,
-//         otp,
-//       );
+export const verifyLoginOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { email, otp } = req.body;
+    const result = await authService.verifyLoginOtp(email, otp);
 
-//     res.cookie("accessToken", result.token, {
-//       httpOnly: true,
-//       secure: COOKIE_SECURE === "true",
-//       sameSite:
-//         COOKIE_SAME_SITE as
-//         | "lax"
-//         | "strict"
-//         | "none",
-//       maxAge:
-//         Number(COOKIE_EXPIRES_DAYS) *
-//         24 *
-//         60 *
-//         60 *
-//         1000,
-//     });
+    res.cookie("accessToken", result.token, {
+      httpOnly: true,
+      secure: COOKIE_SECURE === "true",
+      sameSite:
+        COOKIE_SAME_SITE as
+        | "lax"
+        | "strict"
+        | "none",
+      maxAge:
+        Number(COOKIE_EXPIRES_DAYS) *
+        24 *
+        60 *
+        60 *
+        1000,
+    });
 
-//     return res.status(200).json({
-//       status: "success",
-//       message: "Login successful",
-//       data: {
-//         user: result.user,
-//       },
-//     });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    return res.status(200).json({
+      status: "success",
+      message: "Login successful",
+      data: {
+        user: result.user,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const googleAuthRedirect = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!GOOGLE_CLIENT_ID) {
+      const loginUrl = new URL(`${CORS_ORIGIN}/login`);
+      loginUrl.searchParams.set(
+        "error",
+        "Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env",
+      );
+      return res.redirect(loginUrl.toString());
+    }
+
+    const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+    const options = {
+      redirect_uri: GOOGLE_CALLBACK_URL,
+      client_id: GOOGLE_CLIENT_ID,
+      access_type: "offline",
+      response_type: "code",
+      prompt: "consent",
+      scope: [
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+      ].join(" "),
+    };
+
+    const qs = new URLSearchParams(options);
+    return res.redirect(`${rootUrl}?${qs.toString()}`);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const googleAuthCallback = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const code = req.query.code as string;
+    const error = req.query.error as string;
+
+    if (error || !code) {
+      const loginUrl = new URL(`${CORS_ORIGIN}/login`);
+      loginUrl.searchParams.set(
+        "error",
+        error
+          ? `Google login cancelled: ${error}`
+          : "Missing authorization code from Google",
+      );
+      return res.redirect(loginUrl.toString());
+    }
+
+    const result = await authService.handleGoogleOAuth(code);
+
+    res.cookie("accessToken", result.token, {
+      httpOnly: true,
+      secure: COOKIE_SECURE === "true",
+      sameSite:
+        COOKIE_SAME_SITE as
+        | "lax"
+        | "strict"
+        | "none",
+      maxAge:
+        Number(COOKIE_EXPIRES_DAYS) *
+        24 *
+        60 *
+        60 *
+        1000,
+    });
+
+    return res.redirect(`${CORS_ORIGIN}/dashboard`);
+  } catch (err: any) {
+    console.error("Google Auth Callback Error:", err);
+    const loginUrl = new URL(`${CORS_ORIGIN}/login`);
+    loginUrl.searchParams.set(
+      "error",
+      err?.message || "Failed to complete Google authentication",
+    );
+    return res.redirect(loginUrl.toString());
+  }
+};

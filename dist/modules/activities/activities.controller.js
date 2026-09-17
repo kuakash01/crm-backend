@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getActivities = void 0;
+exports.createActivity = exports.getActivities = void 0;
 const activitiesService = __importStar(require("./activites.service"));
 const getActivities = async (req, res, next) => {
     try {
@@ -50,3 +50,35 @@ const getActivities = async (req, res, next) => {
     }
 };
 exports.getActivities = getActivities;
+const createActivity = async (req, res, next) => {
+    try {
+        const entityType = req.params.entityType.toString().toUpperCase();
+        const entityId = Number(req.params.entityId);
+        const { activityType, description } = req.body;
+        if (!activityType || !description) {
+            return res.status(400).json({
+                status: "error",
+                message: "activityType and description are required",
+            });
+        }
+        const created = await activitiesService.createActivities([
+            {
+                organizationId: Number(req.user.organization_id),
+                entityType,
+                entityId,
+                activityType,
+                description,
+                createdBy: Number(req.user.id),
+            },
+        ]);
+        res.status(201).json({
+            status: "success",
+            message: "Activity logged successfully",
+            data: created[0],
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.createActivity = createActivity;

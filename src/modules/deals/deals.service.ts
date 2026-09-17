@@ -32,7 +32,7 @@ export const createDeal = async (
       stage,
       price,
       expected_close_date,
-
+      assigned_to,
     } = data;
 
     await validateCustomerAndService(
@@ -54,19 +54,17 @@ export const createDeal = async (
       `,
       [customer_id, organizationId]
     );
-    const customer_assigned_to = customerDetails.rows[0].assigned_to;
-
 
     if (!customerDetails.rows.length) {
       throw new AppError("Customer not found", 404);
     }
 
-    const customerAssignedTo =
-      customerDetails.rows[0].assigned_to;
+    const customer_assigned_to = customerDetails.rows[0].assigned_to;
+    const finalAssignedTo = assigned_to || customer_assigned_to;
 
-    if (!customerAssignedTo) {
+    if (!finalAssignedTo) {
       throw new AppError(
-        "Customer must be assigned before creating a deal.",
+        "Customer must have an assigned owner or an owner must be selected for the deal.",
         400
       );
     }
@@ -96,7 +94,7 @@ export const createDeal = async (
         stage ?? "OPEN",
         price,
         expected_close_date ?? null,
-        customer_assigned_to,
+        finalAssignedTo,
         organizationId,
       ]
     );
@@ -112,10 +110,10 @@ export const createDeal = async (
       },
     ], client);
 
-    if (customerAssignedTo !== currentUserId) {
+    if (finalAssignedTo && finalAssignedTo !== currentUserId) {
       await createNotifications({
         organizationId,
-        userIds: [customerAssignedTo],
+        userIds: [finalAssignedTo],
         type: "DEAL",
         action: "ASSIGNED",
         title: "Deal Assigned",

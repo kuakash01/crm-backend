@@ -4,6 +4,7 @@ import { getVisibleUserIds, validateAssignee } from "../users/users.service";
 import { createActivities } from "../activities/activites.service";
 import { createCustomer } from "../customers/customers.service";
 import { leadType } from "./leads.types";
+import { InboundLeadInput } from "./inboundLead.schema";
 // helper
 import { buildLeadFilters, getFilteredLeadCount, getLeadCounts } from "./leads.helper";
 import { buildPagination } from "../../shared/helpers/pagination.helper";
@@ -940,5 +941,184 @@ export const getLeadOptions = async (
       "Error fetching lead options",
       500
     );
+  }
+};
+
+export const createInboundLead = async (input: InboundLeadInput) => {
+  try {
+    const { fname, lname, email, phone1, phone2, company, message, key, website_url } = input;
+
+    // 0. Anti-Bot Honeypot Trap: If hidden honeypot field is filled, silently drop
+    if (website_url && website_url.trim().length > 0) {
+      console.warn(`[Anti-Spam] Dropped bot submission from email: ${email}`);
+      return {
+        id: 0,
+        fname,
+        lname,
+        email,
+        isExisting: false,
+      };
+    }
+
+    // 1. Secure Organization Resolution
+    let orgId: number;
+    if (key) {
+      // Lookup organization by publishable ingest key
+      const orgResult = await pool.query(
+        "SELECT id FROM organizations WHERE inbound_lead_key = $1",
+        [key.trim()]
+      );
+      if (!orgResult.rows.length) {
+        throw new AppError("Invalid or disabled inbound API key", 401);
+      }
+      orgId = Number(orgResult.rows[0].id);
+    } else {
+      // Default: Platform primary organization (dedicated marketing landing page)
+      const platformOrgId = process.env.PLATFORM_PRIMARY_ORG_ID
+        ? Number(process.env.PLATFORM_PRIMARY_ORG_ID)
+        : null;
+
+      if (platformOrgId) {
+        orgId = platformOrgId;
+      } else {
+        const orgResult = await pool.query(
+          "SELECT id FROM organizations ORDER BY id ASC LIMIT 1"
+        );
+        if (!orgResult.rows.length) {
+          throw new AppError("No active organization found to receive lead", 500);
+        }
+        orgId = Number(orgResult.rows[0].id);
+      }
+    }
+
+    // 2. Find administrative users for notification and default creation attribution
+    const adminResult = await pool.query(
+      `SELECT u.id, u.email FROM users u
+       JOIN roles r ON r.id = u.role_id
+       WHERE u.organization_id = $1 AND (UPPER(r.name) = 'OWNER' OR UPPER(r.name) = 'ADMIN')
+       ORDER BY u.id ASC`,
+      [orgId]
+    );
+
+    const adminUserIds: number[] = adminResult.rows.map((row: { id: number }) => row.id);
+    const primaryAdminId: number | null = adminUserIds.length ? adminUserIds[0] : null;
+
+    // 3. Check if lead already exists in this organization
+    const existingLeadRes = await pool.query(
+      `SELECT id, fname, lname, email, status FROM leads WHERE email = $1 AND organization_id = $2`,
+      [email, orgId]
+    );
+
+    if (existingLeadRes.rows.length > 0) {
+      const existingLead = existingLeadRes.rows[0];
+
+      // Add a note with the new message if provided
+      if (message && primaryAdminId) {
+        await pool.query(
+          `INSERT INTO notes (entity_id, entity_type, note, organization_id, created_by)
+           VALUES ($1, 'LEAD', $2, $3, $4)`,
+          [existingLead.id, `Inbound Inquiry:\n${message}`, orgId, primaryAdminId]
+        );
+      }
+
+      if (adminUserIds.length > 0) {
+        await createNotifications({
+          organizationId: orgId,
+          userIds: adminUserIds,
+          type: "LEAD",
+          action: "STATUS_CHANGED",
+          title: "Inbound Message from Existing Lead",
+          message: `Inbound message received from ${existingLead.fname} ${existingLead.lname} (${company || email})`,
+          entityType: "LEAD",
+          entityId: existingLead.id,
+        });
+      }
+
+      return {
+        id: existingLead.id,
+        fname: existingLead.fname,
+        lname: existingLead.lname,
+        email: existingLead.email,
+        isExisting: true,
+      };
+    }
+
+    // 4. Create new lead with DB-safe sanitized values
+    const safeFname = fname.replace(/[^A-Za-z]/g, "") || "Lead";
+    const safeLname = lname.replace(/[^A-Za-z]/g, "") || "Contact";
+    const safePhone1 = phone1.replace(/[^\d+]/g, "");
+    const safePhone2 = phone2 ? phone2.replace(/[^\d+]/g, "") : null;
+
+    const query = `
+      INSERT INTO leads (fname, lname, email, phone1, phone2, company, source, organization_id)
+      VALUES ($1, $2, $3, $4, $5, $6, 'WEBSITE', $7)
+      RETURNING id, fname, lname, email, company, created_at
+    `;
+
+    const values = [
+      safeFname,
+      safeLname,
+      email.toLowerCase().trim(),
+      safePhone1,
+      safePhone2 || null,
+      company?.trim() || null,
+      orgId,
+    ];
+
+    const result = await pool.query(query, values);
+    const newLead = result.rows[0];
+
+    // 5. If message provided, attach as initial note
+    if (message && primaryAdminId) {
+      await pool.query(
+        `INSERT INTO notes (entity_id, entity_type, note, organization_id, created_by)
+         VALUES ($1, 'LEAD', $2, $3, $4)`,
+        [newLead.id, `Inbound Inquiry Message:\n${message}`, orgId, primaryAdminId]
+      );
+    }
+
+    // 6. Log Activity
+    if (primaryAdminId) {
+      const activity: ActivityInput = {
+        organizationId: orgId,
+        entityType: "LEAD",
+        entityId: newLead.id,
+        activityType: "CREATED",
+        description: `Lead received via Website Contact Form (${company || "Direct"})`,
+        createdBy: primaryAdminId,
+      };
+      await createActivities([activity]);
+    }
+
+    // 7. Trigger Real-Time Notification & Dashboard updates
+    if (adminUserIds.length > 0) {
+      await createNotifications({
+        organizationId: orgId,
+        userIds: adminUserIds,
+        type: "LEAD",
+        action: "CREATED",
+        title: "New Website Lead",
+        message: `New inquiry from ${fname} ${lname}${company ? ` (${company})` : ""}`,
+        entityType: "LEAD",
+        entityId: newLead.id,
+      });
+    } else {
+      emitDashboardUpdate(orgId, {
+        entityType: "LEAD",
+        entityId: newLead.id,
+        action: "CREATED",
+      });
+    }
+
+    return {
+      ...newLead,
+      isExisting: false,
+    };
+  } catch (error) {
+    console.error("Error in createInboundLead service:", error);
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError("Failed to submit inquiry", 500);
   }
 };

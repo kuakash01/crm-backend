@@ -1,6 +1,7 @@
 import { Response, Request, NextFunction } from "express";
 import * as leadsService from "./leads.service";
 import { hasPermission } from "../auth/auth.helper";
+import { inboundLeadSchema } from "./inboundLead.schema";
 
 export const getLeads = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -45,6 +46,32 @@ export const createLead = async (req: Request, res: Response, next: NextFunction
     res.status(200).json({ message: "leads created successfully", data: lead });
   } catch (error) {
     next(error)
+  }
+};
+
+export const capturePublicLead = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const headerKey = req.headers["x-inbound-key"] as string | undefined;
+    const bodyData = {
+      ...req.body,
+      fname: req.body.fname || req.body.firstName,
+      lname: req.body.lname || req.body.lastName,
+      phone1: req.body.phone1 || req.body.phone,
+      key: req.body.key || headerKey || undefined,
+    };
+    const validatedData = inboundLeadSchema.parse(bodyData);
+    const result = await leadsService.createInboundLead(validatedData);
+    res.status(201).json({
+      success: true,
+      message: "Inquiry received successfully. Our team will get in touch shortly.",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
   }
 };
 

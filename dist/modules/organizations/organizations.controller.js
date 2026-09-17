@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateMyOrganization = exports.getMyOrganization = void 0;
+exports.regenerateInboundKey = exports.updateMyOrganization = exports.getMyOrganization = void 0;
 const AppError_1 = require("../../shared/errors/AppError");
 const organizations_schema_1 = require("./organizations.schema");
 const organizationService = __importStar(require("./organizations.service"));
@@ -68,3 +68,17 @@ const updateMyOrganization = async (req, res, next) => {
     }
 };
 exports.updateMyOrganization = updateMyOrganization;
+const regenerateInboundKey = async (req, res, next) => {
+    try {
+        const result = await organizationService.regenerateInboundKey(req.user.organization_id);
+        res.status(200).json({
+            status: "success",
+            message: "Inbound API key regenerated successfully",
+            data: result,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+};
+exports.regenerateInboundKey = regenerateInboundKey;

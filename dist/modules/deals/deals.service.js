@@ -15,7 +15,7 @@ const createDeal = async (organizationId, currentUserId, data) => {
     const client = await db_1.pool.connect();
     try {
         await client.query("BEGIN");
-        const { title, customer_id, service_id, stage, price, expected_close_date, } = data;
+        const { title, customer_id, service_id, stage, price, expected_close_date, assigned_to, } = data;
         await (0, deals_helper_1.validateCustomerAndService)(organizationId, customer_id, service_id, client);
         // Get the assigned_to of the customer
         const customerDetails = await client.query(`
@@ -26,13 +26,13 @@ const createDeal = async (organizationId, currentUserId, data) => {
       WHERE id = $1
         AND organization_id = $2
       `, [customer_id, organizationId]);
-        const customer_assigned_to = customerDetails.rows[0].assigned_to;
         if (!customerDetails.rows.length) {
             throw new AppError_1.AppError("Customer not found", 404);
         }
-        const customerAssignedTo = customerDetails.rows[0].assigned_to;
-        if (!customerAssignedTo) {
-            throw new AppError_1.AppError("Customer must be assigned before creating a deal.", 400);
+        const customer_assigned_to = customerDetails.rows[0].assigned_to;
+        const finalAssignedTo = assigned_to || customer_assigned_to;
+        if (!finalAssignedTo) {
+            throw new AppError_1.AppError("Customer must have an assigned owner or an owner must be selected for the deal.", 400);
         }
         // Create deal
         const result = await client.query(`
@@ -57,7 +57,7 @@ const createDeal = async (organizationId, currentUserId, data) => {
             stage ?? "OPEN",
             price,
             expected_close_date ?? null,
-            customer_assigned_to,
+            finalAssignedTo,
             organizationId,
         ]);
         await (0, activites_service_1.createActivities)([
@@ -70,10 +70,10 @@ const createDeal = async (organizationId, currentUserId, data) => {
                 createdBy: currentUserId,
             },
         ], client);
-        if (customerAssignedTo !== currentUserId) {
+        if (finalAssignedTo && finalAssignedTo !== currentUserId) {
             await (0, notification_helper_1.createNotifications)({
                 organizationId,
-                userIds: [customerAssignedTo],
+                userIds: [finalAssignedTo],
                 type: "DEAL",
                 action: "ASSIGNED",
                 title: "Deal Assigned",
