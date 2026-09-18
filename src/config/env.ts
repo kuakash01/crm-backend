@@ -24,7 +24,12 @@ export const OTP_PEPPER = process.env.OTP_PEPPER!;
 // OAuth and Frontend configuration
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-export const GOOGLE_CALLBACK_URL = `${process.env.BACKEND_URL}/api/auth/google/callback`;
+// OAuth must return to the frontend origin so the `/api` rewrite can preserve
+// the HttpOnly cookie on that same origin.
+const FRONTEND_ORIGIN = (CORS_ORIGIN || "").replace(/\/+$/, "");
+export const GOOGLE_CALLBACK_URL =
+  process.env.GOOGLE_CALLBACK_URL ||
+  `${FRONTEND_ORIGIN}/api/auth/google/callback`;
 
 
 if (!process.env.BREVO_API_KEY) {

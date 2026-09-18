@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePassword = exports.resetPassword = exports.forgotPassword = exports.acceptInvitation = exports.getInvitationDetails = exports.getCurrentUser = exports.login = exports.register = exports.verifyEmail = void 0;
+exports.handleGoogleOAuth = exports.verifyLoginOtp = exports.sendLoginOtp = exports.changePassword = exports.resetPassword = exports.forgotPassword = exports.acceptInvitation = exports.getInvitationDetails = exports.getCurrentUser = exports.login = exports.register = exports.verifyEmail = void 0;
 exports.generateOtp = generateOtp;
 exports.hashOtp = hashOtp;
 const db_1 = require("../../config/db");
@@ -879,164 +879,352 @@ const changePassword = async (userId, currentPassword, newPassword) => {
     `, [hashedPassword, userId]);
 };
 exports.changePassword = changePassword;
-// export const verifyLoginOtp = async (
-//   userId: number,
-//   otp: string,
-// ) => {
-//   const client = await pool.connect();
-//   try {
-//     await client.query("BEGIN");
-//     const userResult = await client.query(
-//       `
-//       SELECT
-//         u.id,
-//         u.email,
-//         u.organization_id,
-//         u.email_verified,
-//         u.is_active,
-//         r.name AS role
-//       FROM users u
-//       JOIN roles r
-//         ON u.role_id = r.id
-//       WHERE u.id = $1
-//       `,
-//       [userId],
-//     );
-//     if (userResult.rows.length === 0) {
-//       throw new AppError(
-//         "Invalid login verification request",
-//         400,
-//       );
-//     }
-//     const user = userResult.rows[0];
-//     if (!user.is_active) {
-//       throw new AppError(
-//         "Account is inactive",
-//         403,
-//       );
-//     }
-//     if (!user.email_verified) {
-//       throw new AppError(
-//         "Email is not verified",
-//         403,
-//       );
-//     }
-//     const challengeResult = await client.query(
-//       `
-//       SELECT
-//         id,
-//         otp_hash,
-//         expires_at,
-//         attempts,
-//         max_attempts
-//       FROM auth_otp_challenges
-//       WHERE
-//         user_id = $1
-//         AND purpose = 'LOGIN'
-//         AND consumed_at IS NULL
-//       ORDER BY created_at DESC
-//       LIMIT 1
-//       `,
-//       [userId],
-//     );
-//     if (challengeResult.rows.length === 0) {
-//       throw new AppError(
-//         "Invalid or expired verification code",
-//         400,
-//       );
-//     }
-//     const challenge =
-//       challengeResult.rows[0];
-//     if (
-//       new Date(challenge.expires_at) <=
-//       new Date()
-//     ) {
-//       throw new AppError(
-//         "Verification code has expired",
-//         400,
-//       );
-//     }
-//     if (
-//       challenge.attempts >=
-//       challenge.max_attempts
-//     ) {
-//       throw new AppError(
-//         "Too many attempts. Please request a new code.",
-//         429,
-//       );
-//     }
-//     const submittedOtpHash =
-//       hashOtp(otp);
-//     if (
-//       submittedOtpHash !==
-//       challenge.otp_hash
-//     ) {
-//       await client.query(
-//         `
-//         UPDATE auth_otp_challenges
-//         SET attempts = attempts + 1
-//         WHERE id = $1
-//         `,
-//         [challenge.id],
-//       );
-//       await client.query("COMMIT");
-//       throw new AppError(
-//         "Invalid verification code",
-//         400,
-//       );
-//     }
-//     // Consume OTP
-//     await client.query(
-//       `
-//       UPDATE auth_otp_challenges
-//       SET consumed_at = NOW()
-//       WHERE id = $1
-//       `,
-//       [challenge.id],
-//     );
-//     await client.query("COMMIT");
-//     // Use the SAME JWT payload/signing logic
-//     // as your existing login implementation.
-//     const token = jwt.sign(
-//       {
-//         id: user.id,
-//         email: user.email,
-//         role: user.role,
-//         organizationId: user.organization_id,
-//       },
-//       JWT_SECRET,
-//       {
-//         expiresIn: JWT_EXPIRES_IN,
-//       },
-//     );
-//     return {
-//       token,
-//       user: {
-//         id: user.id,
-//         email: user.email,
-//         role: user.role,
-//         organizationId:
-//           user.organization_id,
-//       },
-//     };
-//   } catch (error) {
-//     try {
-//       await client.query("ROLLBACK");
-//     } catch {
-//       // Transaction may already be committed.
-//     }
-//     if (error instanceof AppError) {
-//       throw error;
-//     }
-//     console.error(
-//       "Error in verifyLoginOtp:",
-//       error,
-//     );
-//     throw new AppError(
-//       "Failed to verify login",
-//       500,
-//     );
-//   } finally {
-//     client.release();
-//   }
-// };
+const sendLoginOtp = async (email) => {
+    if (!email || !email.trim()) {
+        throw new AppError_1.AppError("Email is required", 400);
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const userResult = await db_1.pool.query(`
+    SELECT
+      id,
+      fullname,
+      email,
+      is_active,
+      email_verified
+    FROM users
+    WHERE email = $1
+    `, [normalizedEmail]);
+    if (userResult.rows.length === 0) {
+        throw new AppError_1.AppError("No account found with this email address. Please register first.", 404);
+    }
+    const user = userResult.rows[0];
+    if (!user.is_active) {
+        throw new AppError_1.AppError("Account is inactive. Please contact support.", 403);
+    }
+    // Rate limit: check if a code was sent in the last 60 seconds
+    const recentChallenge = await db_1.pool.query(`
+    SELECT id, last_sent_at
+    FROM auth_otp_challenges
+    WHERE user_id = $1
+      AND purpose = 'LOGIN_OTP'
+      AND last_sent_at > NOW() - INTERVAL '60 seconds'
+    ORDER BY created_at DESC
+    LIMIT 1
+    `, [user.id]);
+    if (recentChallenge.rows.length > 0) {
+        throw new AppError_1.AppError("A code was recently sent. Please wait 60 seconds before requesting a new one.", 429);
+    }
+    // Invalidate previous unconsumed LOGIN_OTP challenges
+    await db_1.pool.query(`
+    UPDATE auth_otp_challenges
+    SET consumed_at = NOW()
+    WHERE user_id = $1
+      AND purpose = 'LOGIN_OTP'
+      AND consumed_at IS NULL
+    `, [user.id]);
+    const otp = generateOtp();
+    const otpHash = hashOtp(otp);
+    await db_1.pool.query(`
+    INSERT INTO auth_otp_challenges (
+      user_id,
+      purpose,
+      otp_hash,
+      expires_at,
+      attempts,
+      max_attempts,
+      last_sent_at
+    )
+    VALUES ($1, 'LOGIN_OTP', $2, NOW() + INTERVAL '10 minutes', 0, 5, NOW())
+    `, [user.id, otpHash]);
+    console.log(`\x1b[36m[DEV OTP] Login code for ${normalizedEmail} is: ${otp}\x1b[0m`);
+    try {
+        await (0, emailTemplates_1.sendLoginOtpEmail)(normalizedEmail, otp);
+    }
+    catch (err) {
+        console.error("Failed to send login OTP email via Brevo:", err);
+    }
+    return {
+        success: true,
+        message: "A 6-digit login verification code has been sent to your email.",
+    };
+};
+exports.sendLoginOtp = sendLoginOtp;
+const verifyLoginOtp = async (email, otp) => {
+    if (!email || !otp) {
+        throw new AppError_1.AppError("Email and verification code are required", 400);
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanOtp = otp.trim();
+    const client = await db_1.pool.connect();
+    try {
+        await client.query("BEGIN");
+        const userResult = await client.query(`
+      SELECT
+        u.id,
+        u.fullname,
+        u.email,
+        u.organization_id,
+        u.email_verified,
+        u.is_active,
+        r.name AS role
+      FROM users u
+      JOIN roles r
+        ON u.role_id = r.id
+      WHERE u.email = $1
+      `, [normalizedEmail]);
+        if (userResult.rows.length === 0) {
+            throw new AppError_1.AppError("Invalid login verification request", 400);
+        }
+        const user = userResult.rows[0];
+        if (!user.is_active) {
+            throw new AppError_1.AppError("Account is inactive", 403);
+        }
+        const challengeResult = await client.query(`
+      SELECT
+        id,
+        otp_hash,
+        expires_at,
+        attempts,
+        max_attempts
+      FROM auth_otp_challenges
+      WHERE
+        user_id = $1
+        AND purpose = 'LOGIN_OTP'
+        AND consumed_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+      `, [user.id]);
+        if (challengeResult.rows.length === 0) {
+            throw new AppError_1.AppError("Invalid or expired verification code. Please request a new code.", 400);
+        }
+        const challenge = challengeResult.rows[0];
+        if (new Date(challenge.expires_at) <= new Date()) {
+            throw new AppError_1.AppError("Verification code has expired. Please request a new one.", 400);
+        }
+        if (challenge.attempts >= challenge.max_attempts) {
+            throw new AppError_1.AppError("Too many invalid attempts. Please request a new code.", 429);
+        }
+        const submittedOtpHash = hashOtp(cleanOtp);
+        if (submittedOtpHash !== challenge.otp_hash) {
+            await client.query(`
+        UPDATE auth_otp_challenges
+        SET attempts = attempts + 1
+        WHERE id = $1
+        `, [challenge.id]);
+            await client.query("COMMIT");
+            throw new AppError_1.AppError("Invalid verification code", 400);
+        }
+        // Mark challenge consumed
+        await client.query(`
+      UPDATE auth_otp_challenges
+      SET consumed_at = NOW()
+      WHERE id = $1
+      `, [challenge.id]);
+        // If email wasn't verified yet, verify it now
+        if (!user.email_verified) {
+            await client.query(`
+        UPDATE users
+        SET email_verified = TRUE, updated_at = NOW()
+        WHERE id = $1
+        `, [user.id]);
+        }
+        await client.query("COMMIT");
+        const token = jsonwebtoken_1.default.sign({
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            organizationId: user.organization_id,
+        }, env_1.JWT_SECRET, {
+            expiresIn: env_1.JWT_EXPIRES_IN,
+        });
+        return {
+            token,
+            user: {
+                id: user.id,
+                fullName: user.fullname,
+                email: user.email,
+                role: user.role,
+                organizationId: user.organization_id,
+            },
+        };
+    }
+    catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        }
+        catch {
+            // Transaction may already be committed.
+        }
+        if (error instanceof AppError_1.AppError) {
+            throw error;
+        }
+        console.error("Error in verifyLoginOtp:", error);
+        throw new AppError_1.AppError("Failed to verify login", 500);
+    }
+    finally {
+        client.release();
+    }
+};
+exports.verifyLoginOtp = verifyLoginOtp;
+const handleGoogleOAuth = async (code) => {
+    if (!env_1.GOOGLE_CLIENT_ID || !env_1.GOOGLE_CLIENT_SECRET) {
+        throw new AppError_1.AppError("Google OAuth is not configured on the server. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env", 500);
+    }
+    // 1. Exchange authorization code for tokens
+    const tokenParams = new URLSearchParams({
+        code,
+        client_id: env_1.GOOGLE_CLIENT_ID,
+        client_secret: env_1.GOOGLE_CLIENT_SECRET,
+        redirect_uri: env_1.GOOGLE_CALLBACK_URL,
+        grant_type: "authorization_code",
+    });
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: tokenParams.toString(),
+    });
+    const tokenData = (await tokenResponse.json());
+    if (!tokenResponse.ok || !tokenData.access_token) {
+        console.error("Google token exchange failed:", tokenData);
+        throw new AppError_1.AppError(tokenData.error_description || "Failed to authenticate with Google", 400);
+    }
+    // 2. Fetch Google profile
+    const userinfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: {
+            Authorization: `Bearer ${tokenData.access_token}`,
+        },
+    });
+    const profile = (await userinfoResponse.json());
+    if (!userinfoResponse.ok || !profile.email) {
+        console.error("Google userinfo fetch failed:", profile);
+        throw new AppError_1.AppError("Failed to retrieve profile from Google", 400);
+    }
+    const email = profile.email.toLowerCase().trim();
+    const googleId = profile.id;
+    const fullName = profile.name || email.split("@")[0];
+    const client = await db_1.pool.connect();
+    try {
+        await client.query("BEGIN");
+        // 3. Find if user exists by email
+        const existingUserRes = await client.query(`
+      SELECT
+        u.id,
+        u.fullname,
+        u.email,
+        u.organization_id,
+        u.role_id,
+        u.is_active,
+        u.oauth_provider,
+        u.oauth_id,
+        r.name AS role
+      FROM users u
+      JOIN roles r
+        ON u.role_id = r.id
+      WHERE u.email = $1
+      `, [email]);
+        let user;
+        if (existingUserRes.rows.length > 0) {
+            user = existingUserRes.rows[0];
+            if (!user.is_active) {
+                throw new AppError_1.AppError("Account is inactive. Please contact support.", 403);
+            }
+            // Link Google OAuth if not linked yet
+            if (user.oauth_provider !== "google" || user.oauth_id !== googleId) {
+                await client.query(`
+          UPDATE users
+          SET
+            oauth_provider = 'google',
+            oauth_id = $1,
+            email_verified = TRUE,
+            updated_at = NOW()
+          WHERE id = $2
+          `, [googleId, user.id]);
+            }
+        }
+        else {
+            // 4. Register new user via Google
+            const orgName = `${fullName}'s Workspace`;
+            // Create Organization
+            const orgRes = await client.query(`
+        INSERT INTO organizations (name)
+        VALUES ($1)
+        RETURNING id
+        `, [orgName]);
+            const organizationId = orgRes.rows[0].id;
+            // Create Admin Role
+            const roleRes = await client.query(`
+        INSERT INTO roles (organization_id, name, description)
+        VALUES ($1, 'admin', $2)
+        RETURNING id
+        `, [organizationId, `admin of organization '${orgName}'`]);
+            const roleId = roleRes.rows[0].id;
+            // Grant all permissions to admin
+            await client.query(`
+        INSERT INTO role_permissions (role_id, permission_id)
+        SELECT $1, p.id
+        FROM permissions p
+        `, [roleId]);
+            // Generate a strong random password meeting password complexity constraint
+            const randomPassword = "GAuth_" + crypto_1.default.randomBytes(16).toString("hex") + "9A!";
+            const hashedPassword = await bcryptjs_1.default.hash(randomPassword, env_1.BCRYPT_SALT_ROUNDS ? parseInt(env_1.BCRYPT_SALT_ROUNDS) : 10);
+            // Create User
+            const newUserRes = await client.query(`
+        INSERT INTO users (
+          organization_id,
+          fullname,
+          email,
+          password,
+          role_id,
+          email_verified,
+          oauth_provider,
+          oauth_id
+        )
+        VALUES ($1, $2, $3, $4, $5, TRUE, 'google', $6)
+        RETURNING id, fullname, email, organization_id, role_id
+        `, [organizationId, fullName, email, hashedPassword, roleId, googleId]);
+            user = {
+                ...newUserRes.rows[0],
+                role: "admin",
+            };
+        }
+        await client.query("COMMIT");
+        // 5. Generate JWT token
+        const token = jsonwebtoken_1.default.sign({
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            organizationId: user.organization_id,
+        }, env_1.JWT_SECRET, {
+            expiresIn: env_1.JWT_EXPIRES_IN,
+        });
+        return {
+            token,
+            user: {
+                id: user.id,
+                fullName: user.fullname,
+                email: user.email,
+                role: user.role,
+                organizationId: user.organization_id,
+            },
+        };
+    }
+    catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        }
+        catch {
+            // Transaction may already be committed.
+        }
+        if (error instanceof AppError_1.AppError) {
+            throw error;
+        }
+        console.error("Error in handleGoogleOAuth:", error);
+        throw new AppError_1.AppError("Failed to complete Google authentication", 500);
+    }
+    finally {
+        client.release();
+    }
+};
+exports.handleGoogleOAuth = handleGoogleOAuth;
